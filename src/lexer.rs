@@ -5,12 +5,6 @@ pub struct Span {
     pub line: usize,
 }
 
-impl Span {
-    pub fn is_empty(&self) -> bool {
-        self.start == self.end
-    }
-}
-
 #[derive(Debug)]
 enum DirectiveType {
     Os,
@@ -76,8 +70,14 @@ enum Identifier {
 }
 
 #[derive(Debug)]
+enum LiteralType {
+    Signed(i16),
+    Unsigned(u16),
+}
+
+#[derive(Debug)]
 enum TokenType {
-    Literal(u16),
+    Literal(LiteralType),
     Identifier(Identifier),
     Directive(DirectiveType),
     Instruction(InstructionType),
@@ -186,6 +186,7 @@ fn directive_type(s: &str) -> Option<DirectiveType> {
 fn instruction_type(s: &str) -> Option<InstructionType> {
     use InstructionType::*;
     match &*s.to_lowercase() {
+        "nop" => Some(Nop),
         "brp" => Some(Brp),
         "brz" => Some(Brz),
         "brzp" => Some(Brzp),
@@ -269,7 +270,7 @@ impl<'input> Lexer<'input> {
         self.consume_while(is_whitespace);
     }
     
-    fn ensure(&mut self, f: impl Fn(char) -> bool) -> bool {
+    fn check(&mut self, f: impl Fn(char) -> bool) -> bool {
         match self.char_iter.peek() {
             Some(c) if f(c) => true,
             _ => false,
@@ -277,11 +278,11 @@ impl<'input> Lexer<'input> {
     }
     
     fn directive(&mut self) -> Option<Result<Token<'input>, String>> {
-        if !self.ensure(is_identifier) {
+        if !self.check(is_identifier) {
             return Some(Err(format!("Expected directive name after '.'.")));
         } else {
             self.consume_while(is_alpha);
-            if !self.ensure(is_whitespace) {
+            if !self.check(is_whitespace) {
                 return Some(Err(format!("Expected space after directive name.")))
             }
         }
@@ -299,14 +300,20 @@ impl<'input> Lexer<'input> {
     }
     
     fn decimal(&mut self, leading_pound: bool) -> Option<Result<Token<'input>, String>> {
+        let mut is_negative = false;
+
         if leading_pound {
-            if !self.ensure(is_decimal) {
+            if self.check(|c| c == '-') {
+                self.char_iter.consume();
+                is_negative = true;
+            }
+            if !self.check(is_decimal) {
                 return Some(Err(format!("Expected decimal number after '#'.")));
             }
         }
         
         self.consume_while(is_decimal);
-        if !self.ensure(is_whitespace) {
+        if !self.check(is_whitespace) {
             return Some(Err(String::from("Expected space after decimal literal.")));
         }
 
@@ -317,18 +324,35 @@ impl<'input> Lexer<'input> {
             value_text = &value_text[1..];
         }
 
-        let value = match value_text.parse::<u16>() {
-            Ok(v) => v,
-            Err(e) => {
-                match e.kind() {
-                    std::num::IntErrorKind::PosOverflow => return Some(Err(format!("{} is too large to fit in 16 bits.", value_text))),
-                    _ => panic!("Internal integer parse error {:?} on text '{}'.", e, value_text),
+        if !is_negative {
+            match value_text.parse::<u16>() {
+                Ok(v) =>  {
+                    let token = Token { span, chars, ty: TokenType::Literal(LiteralType::Unsigned(v)) };
+                    return Some(Ok(token));
+                },
+                Err(e) => {
+                    match e.kind() {
+                        std::num::IntErrorKind::PosOverflow => return Some(Err(format!("{} is too large to fit in a 16 bit unsigned.", value_text))),
+                        _ => panic!("Internal integer parse error {:?} on text '{}'.", e, value_text),
+                    }
                 }
-            }
-        };
+            };
+        } else {
+            match value_text.parse::<i16>() {
+                Ok(v) =>  {
+                    let token = Token { span, chars, ty: TokenType::Literal(LiteralType::Signed(v)) };
+                    return Some(Ok(token));
+                },
+                Err(e) => {
+                    match e.kind() {
+                        std::num::IntErrorKind::PosOverflow => return Some(Err(format!("{} is too large to fit in a 16 bit signed.", value_text))),
+                        std::num::IntErrorKind::NegOverflow => return Some(Err(format!("{} is too small to fit in a 16 bit signed.", value_text))),
+                        _ => panic!("Internal integer parse error {:?} on text '{}'.", e, value_text),
+                    }
+                }
+            };
+        }
         
-        let token = Token { span, chars, ty: TokenType::Literal(value) };
-        Some(Ok(token))
     }
     
     fn single_char(&mut self, ty: TokenType) -> Option<Result<Token<'input>, String>> {
