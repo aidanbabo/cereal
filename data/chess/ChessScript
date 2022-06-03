@@ -1,0 +1,7 @@
+clear
+reset
+as os os
+as Chess libc Chess
+ld os
+ld Chess
+break set TRAP_HALT
