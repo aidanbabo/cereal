@@ -1,3 +1,7 @@
+use std::borrow::Cow;
+
+use crate::InstructionType;
+
 #[derive(Clone, Copy, Debug)]
 pub struct Span {
     pub start: usize,
@@ -5,8 +9,8 @@ pub struct Span {
     pub line: usize,
 }
 
-#[derive(Debug)]
-enum DirectiveType {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DirectiveType {
     Os,
     Code,
     Data,
@@ -16,90 +20,59 @@ enum DirectiveType {
     Stringz,
     Blkw,
     Const,
-    UConst,
-}
-
-#[derive(Debug)]
-enum InstructionType {
-    Nop,
-    Brp,
-    Brz,
-    Brzp,
-    Brn,
-    Brnp,
-    Brnz,
-    Brnzp,
-    Add,
-    Mul,
-    Sub,
-    Div,
-    Mod,
-    And,
-    Not,
-    Or,
-    Xor,
-    Ldr,
-    Str,
-    Const,
-    Hiconst,
-    Cmp,
-    Cmpu,
-    Cmpi,
-    Cmpiu,
-    Sll,
-    Sra,
-    Srl,
-    Jsrr,
-    Jsr,
-    Jmpr,
-    Jmp,
-    Trap,
-    Rti,
-    Ret,
-    Lea,
-    Lc,
+    Uconst,
 }
 
 /// Hex Literals and Registers could be confused for labels and vice versa, so we parse identifiers
 /// as though they could be either if they lead with an 'r' or an 'h'
-#[derive(Debug)]
-enum Identifier {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Identifier {
     Hex(u16),
     Register(u8),
     Identifier,
 }
 
-#[derive(Debug)]
-enum LiteralType {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LiteralType {
     Signed(i16),
     Unsigned(u16),
 }
 
-#[derive(Debug)]
-enum TokenType {
+impl LiteralType {
+    pub fn to_i32(self) -> i32 {
+        match self {
+            LiteralType::Signed(s) => s as i32,
+            LiteralType::Unsigned(u) => u as i32,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TokenType<'a> {
     Literal(LiteralType),
     Identifier(Identifier),
     Directive(DirectiveType),
     Instruction(InstructionType),
+    String(Cow<'a, str>),
     Comma,
     Colon,
 }
 
-#[derive(Debug)]
-pub struct Token<'input> {
-    span: Span,
-    chars: &'input str,
-    ty: TokenType,
+#[derive(Clone, Debug)]
+pub struct Token<'a> {
+    pub span: Span,
+    pub chars: &'a str,
+    pub ty: TokenType<'a>,
 }
 
-struct CharIter<'input> {
-    iter: std::str::CharIndices<'input>,
+struct CharIter<'a> {
+    iter: std::str::CharIndices<'a>,
     peek_pair: Option<(usize, char)>,
-    input: &'input str,
+    input: &'a str,
 }
 
-impl<'input> CharIter<'input> {
-    fn new(input: &'input str) -> Self {
+impl<'a> CharIter<'a> {
+    fn new(input: &'a str) -> Self {
         CharIter {
             iter: input.char_indices(),
             peek_pair: None,
@@ -178,7 +151,7 @@ fn directive_type(s: &str) -> Option<DirectiveType> {
         "stringz" => Some(Stringz),
         "blkw" => Some(Blkw),
         "const" => Some(Const),
-        "uconst" => Some(UConst),
+        "uconst" => Some(Uconst),
         _ => None,
     }
 }
@@ -228,15 +201,15 @@ fn instruction_type(s: &str) -> Option<InstructionType> {
 }
 
 
-pub struct Lexer<'input> {
-    input: &'input str,
-    char_iter: CharIter<'input>,
+pub struct Lexer<'a> {
+    input: &'a str,
+    char_iter: CharIter<'a>,
     token_start: usize,
     line: usize,
 }
 
-impl<'input> Lexer<'input> {
-    pub fn new(input: &'input str) -> Self {
+impl<'a> Lexer<'a> {
+    pub fn new(input: &'a str) -> Self {
         let char_iter = CharIter::new(input);
         Lexer { 
             input, 
@@ -277,13 +250,13 @@ impl<'input> Lexer<'input> {
         }
     }
     
-    fn directive(&mut self) -> Option<Result<Token<'input>, String>> {
+    fn directive(&mut self) -> Result<Token<'a>, String> {
         if !self.check(is_identifier) {
-            return Some(Err(format!("Expected directive name after '.'.")));
+            return Err(format!("Expected directive name after '.'."));
         } else {
             self.consume_while(is_alpha);
             if !self.check(is_whitespace) {
-                return Some(Err(format!("Expected space after directive name.")))
+                return Err(format!("Expected space after directive name."));
             }
         }
 
@@ -292,14 +265,14 @@ impl<'input> Lexer<'input> {
         let ty = if let Some(ty) = directive_type(&chars[1..]) {
             TokenType::Directive(ty)
         } else {
-            return Some(Err(format!("{} is not a directive name.", &chars[1..])));
+            return Err(format!("{} is not a directive name.", &chars[1..]));
         };
         let token = Token { span, chars, ty };
     
-        return Some(Ok(token));
+        return Ok(token);
     }
     
-    fn decimal(&mut self, leading_pound: bool) -> Option<Result<Token<'input>, String>> {
+    fn decimal(&mut self, leading_pound: bool) -> Result<Token<'a>, String> {
         let mut is_negative = false;
 
         if leading_pound {
@@ -308,13 +281,13 @@ impl<'input> Lexer<'input> {
                 is_negative = true;
             }
             if !self.check(is_decimal) {
-                return Some(Err(format!("Expected decimal number after '#'.")));
+                return Err(format!("Expected decimal number after '#'."));
             }
         }
         
         self.consume_while(is_decimal);
         if !self.check(is_whitespace) {
-            return Some(Err(String::from("Expected space after decimal literal.")));
+            return Err(String::from("Expected space after decimal literal."));
         }
 
         let span = self.span();
@@ -328,11 +301,11 @@ impl<'input> Lexer<'input> {
             match value_text.parse::<u16>() {
                 Ok(v) =>  {
                     let token = Token { span, chars, ty: TokenType::Literal(LiteralType::Unsigned(v)) };
-                    return Some(Ok(token));
+                    return Ok(token);
                 },
                 Err(e) => {
                     match e.kind() {
-                        std::num::IntErrorKind::PosOverflow => return Some(Err(format!("{} is too large to fit in a 16 bit unsigned.", value_text))),
+                        std::num::IntErrorKind::PosOverflow => return Err(format!("{} is too large to fit in a 16 bit unsigned integer.", value_text)),
                         _ => panic!("Internal integer parse error {:?} on text '{}'.", e, value_text),
                     }
                 }
@@ -341,12 +314,12 @@ impl<'input> Lexer<'input> {
             match value_text.parse::<i16>() {
                 Ok(v) =>  {
                     let token = Token { span, chars, ty: TokenType::Literal(LiteralType::Signed(v)) };
-                    return Some(Ok(token));
+                    return Ok(token);
                 },
                 Err(e) => {
                     match e.kind() {
-                        std::num::IntErrorKind::PosOverflow => return Some(Err(format!("{} is too large to fit in a 16 bit signed.", value_text))),
-                        std::num::IntErrorKind::NegOverflow => return Some(Err(format!("{} is too small to fit in a 16 bit signed.", value_text))),
+                        std::num::IntErrorKind::PosOverflow => return Err(format!("{} is too large to fit in a 16 bit signed integer.", value_text)),
+                        std::num::IntErrorKind::NegOverflow => return Err(format!("{} is too small to fit in a 16 bit signed integer.", value_text)),
                         _ => panic!("Internal integer parse error {:?} on text '{}'.", e, value_text),
                     }
                 }
@@ -355,14 +328,70 @@ impl<'input> Lexer<'input> {
         
     }
     
-    fn single_char(&mut self, ty: TokenType) -> Option<Result<Token<'input>, String>> {
+    fn single_char(&mut self, ty: TokenType<'a>) -> Result<Token<'a>, String> {
         let span = self.span();
         let chars = &self.input[span.start..span.end];
         let token = Token { span, chars, ty };
-        Some(Ok(token))
+        Ok(token)
     }
     
-    fn identifier(&mut self, could_be_hex: bool, could_be_register: bool) -> Option<Result<Token<'input>, String>> {
+    fn string(&mut self) -> Result<Token<'a>, String> {
+
+        // custom consume_while to accomodate \" sequence
+        let mut escaped = false;
+        while let Some(c) = self.char_iter.peek() {
+            if c == '"' && !escaped {
+                break;
+            }
+
+            if c == '\\' {
+                escaped = true;
+            } else {
+                escaped = false;
+            }
+            self.char_iter.consume();
+            if c == '\n' { 
+                self.line += 1
+            }
+        }
+
+        self.consume_while(|c| c != '"');
+        if self.char_iter.consume() != Some('"') {
+            return Err("Expected closing '\"' in string literal.".to_string());
+        }
+
+        let span = self.span();
+        let chars = &self.input[span.start..span.end];
+        let contents = &chars[1..chars.len() - 1];
+        let contents = if contents.contains('\\') {
+            let mut string = String::new();
+            let mut escaped = false;
+            for c in contents.chars() {
+                if escaped {
+                    escaped = false;
+                    match c {
+                        'n' => string.push('\n'),
+                        't' => string.push('\t'),
+                        '"' => string.push('"'),
+                        '\\' => string.push('\\'),
+                        _ => return Err(format!("Unsupported escape sequence '\\{}'", c)),
+                    }
+                } else if c != '\\' {
+                    string.push(c);
+                } else {
+                    escaped = true;
+                }
+            }
+            Cow::Owned(string)
+        } else {
+            Cow::Borrowed(contents)
+        };
+
+        let token = Token { span, chars, ty: TokenType::String(contents) };
+        Ok(token)
+    }
+    
+    fn identifier(&mut self, could_be_hex: bool, could_be_register: bool) -> Result<Token<'a>, String> {
         self.consume_while(is_identifier);
         let span = self.span();
         let chars = &self.input[span.start..span.end];
@@ -373,14 +402,14 @@ impl<'input> Lexer<'input> {
                 Ok(v) => v,
                 Err(e) => {
                     match e.kind() {
-                        std::num::IntErrorKind::PosOverflow => return Some(Err(format!("{} is too large to fit in 16 bits.", value_text))),
+                        std::num::IntErrorKind::PosOverflow => return Err(format!("{} is too large to fit in 16 bits.", value_text)),
                         _ => panic!("Internal integer parse error {:?} on text '{}'.", e, value_text),
                     }
                 }
             };
 
             let token = Token { span, chars, ty: TokenType::Identifier(Identifier::Hex(value)) };
-            return Some(Ok(token));
+            return Ok(token);
         }
         
         if could_be_register && chars[1..].chars().all(is_decimal) {
@@ -390,43 +419,44 @@ impl<'input> Lexer<'input> {
                 Ok(v) => v,
                 Err(e) => {
                     match e.kind() {
-                        std::num::IntErrorKind::PosOverflow => return Some(Err(format!("No such register {}.", value_text))),
+                        std::num::IntErrorKind::PosOverflow => return Err(format!("No such register '{}'.", value_text)),
                         _ => panic!("Internal integer parse error {:?} on text '{}'.", e, value_text),
                     }
                 }
             };
             if value >= 8 {
-                return Some(Err(format!("No such register {}.", value_text)));
+                return Err(format!("No such register '{}'.", value_text));
             }
 
             let token = Token { span, chars, ty: TokenType::Identifier(Identifier::Register(value)) };
-            return Some(Ok(token));
+            return Ok(token);
         }
         
         if let Some(ty) = instruction_type(chars) {
             let token = Token { span, chars, ty: TokenType::Instruction(ty) };
-            return Some(Ok(token))
+            return Ok(token)
         }
 
         let token = Token { span, chars, ty: TokenType::Identifier(Identifier::Identifier) };
-        Some(Ok(token))
+        Ok(token)
     }
     
-    fn next_token(&mut self) -> Option<Result<Token<'input>, String>> {
+    fn next_token(&mut self) -> Option<Result<Token<'a>, String>> {
         loop {
             self.consume_whitespace();
             self.token_start = self.char_iter.peek_position();
     
             match self.char_iter.consume()? {
                 ';' => self.consume_while(|c| c != '\n'),
-                ',' => return self.single_char(TokenType::Comma),
-                ':' => return self.single_char(TokenType::Colon),
-                '.' => return self.directive(),
-                '#' => return self.decimal(true),
-                c if is_decimal(c) => return self.decimal(false),
-                'r' | 'R' => return self.identifier(false, true),
-                'x' | 'X' => return self.identifier(true, false),
-                c if is_identifier(c) => return self.identifier(false, false),
+                ',' => return Some(self.single_char(TokenType::Comma)),
+                ':' => return Some(self.single_char(TokenType::Colon)),
+                '.' => return Some(self.directive()),
+                '#' => return Some(self.decimal(true)),
+                c if is_decimal(c) => return Some(self.decimal(false)),
+                'r' | 'R' => return Some(self.identifier(false, true)),
+                'x' | 'X' => return Some(self.identifier(true, false)),
+                c if is_identifier(c) => return Some(self.identifier(false, false)),
+                '"' => return Some(self.string()),
                 _ => {
                     self.consume_while(|c| !is_token_delimeter(c));
                     let span = self.span();
@@ -437,8 +467,8 @@ impl<'input> Lexer<'input> {
     }
 }
 
-impl<'input> Iterator for Lexer<'input> {
-    type Item = Result<Token<'input>, String>;
+impl<'a> Iterator for Lexer<'a> {
+    type Item = Result<Token<'a>, String>;
     
     fn next(&mut self) -> Option<Self::Item> {
         self.next_token()

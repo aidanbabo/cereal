@@ -1,17 +1,18 @@
-use clap::Parser;
+// @Todo error handling, use span information
+
 use std::path::PathBuf;
 
-mod lexer;
-use lexer::Lexer;
+use cereal::lexer::Lexer;
+use cereal::parser::Parser;
 
-#[derive(Parser)]
+#[derive(clap::Parser)]
 struct Args {
     path: PathBuf,
 }
 
 fn main() {
-    let args = Args::parse();
-    let string = match std::fs::read_to_string(args.path) {
+    let args = <Args as clap::Parser>::parse();
+    let string = match std::fs::read_to_string(&args.path) {
         Ok(s) => s,
         Err(e) => {
             println!("Failed to open file {}", e);
@@ -21,19 +22,58 @@ fn main() {
     
     let lexer = Lexer::new(&string);
     
-    println!("TOKENS:");
+    let mut tokens = vec![];
+    let mut errors = vec![];
+    
+    println!("SOURCE:");
+    println!("{}", string);
+
     for token in lexer {
         match token {
-            Ok(token) => {
-                println!("{:?}", token);
-            }
-            Err(e) => {
-                println!("ERROR: {}", e);
-            }
+            Ok(token) => if errors.is_empty() { tokens.push(token) },
+            Err(error) => errors.push(error),
         }
     }
     
     println!();
-    println!("SOURCE:");
-    println!("{}", string);
+
+    if !errors.is_empty() {
+        for error in errors {
+            println!("ERROR in file {:?}: {}", &args.path, error);
+        }
+        return;
+    }
+
+    println!("TOKENS:");
+    for token in &tokens {
+        println!("{:?}", token);
+    }
+    
+    let parser = Parser::new(tokens);
+    
+    let mut blocks = vec![];
+    let mut errors = vec![];
+    for block in parser {
+        match block {
+            Ok(block) => if errors.is_empty() { blocks.push(block) },
+            Err(error) => errors.push(error),
+        }
+    }
+    
+    println!();
+
+    if !errors.is_empty() {
+        for error in errors {
+            println!("ERROR in file {:?}: {}", &args.path, error);
+        }
+        return;
+    }
+    
+    /*
+    println!("BLOCKS:");
+    for block in &blocks {
+        println!("{:?}", block);
+    }
+    */
+    
 }
