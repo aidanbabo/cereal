@@ -44,16 +44,18 @@ fn main() {
         return;
     }
 
+    /*
     println!("TOKENS:");
     for token in &tokens {
         println!("{:?}", token);
     }
+    */
     
-    let parser = Parser::new(tokens);
+    let mut parser = Parser::new(tokens);
     
     let mut blocks = vec![];
     let mut errors = vec![];
-    for block in parser {
+    for block in &mut parser {
         match block {
             Ok(block) => if errors.is_empty() { blocks.push(block) },
             Err(error) => errors.push(error),
@@ -75,5 +77,8 @@ fn main() {
         println!("{:?}", block);
     }
     */
+    
+    println!("PRINTED:");
+    cereal::parser::print_blocks(&blocks, &parser.constants).unwrap();
     
 }

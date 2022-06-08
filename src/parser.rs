@@ -7,9 +7,9 @@ use crate::lexer::{Token, TokenType, DirectiveType, Identifier, LiteralType};
 #[derive(Debug)]
 struct InstructionWithLabel<'a> {
     ty: InstructionType,
-    rd: u8,
-    rs: u8,
-    rt: u8,
+    rd: i8,
+    rs: i8,
+    rt: i8,
     immediate: i32,
     label: Option<&'a str>,
 }
@@ -35,18 +35,127 @@ pub struct Block<'a> {
     ty: BlockType<'a>,
 }
 
+use std::io::{self, Write};
+
+fn write_instruction(writer: &mut dyn Write, instruction: &InstructionWithLabel) -> io::Result<()> {
+    write!(writer, "\t{}", instruction.ty)?;
+    let ops = &mut [Operand::Label; 3];
+    let ops = instruction_operands(instruction.ty, &mut ops[..]);
+    
+    for (i, op) in ops.into_iter().enumerate() {
+        if i != 0 {
+            write!(writer, ", ")?;
+        } else {
+            write!(writer, " ")?;
+        }
+        
+        match op {
+            Operand::Label => write!(writer, "{}", instruction.label.unwrap())?,
+            Operand::Register { register } => {
+                let number = match register {
+                    Reg::Rd => instruction.rd,
+                    Reg::Rs => instruction.rs,
+                    Reg::Rt => instruction.rt,
+                };
+                write!(writer, "r{}", number)?;
+            }
+            Operand::Immediate { .. } => write!(writer, "#{}", instruction.immediate)?,
+            Operand::RegisterOrImmediate { register, .. } => {
+                if instruction.immediate == i32::MAX {
+                    let number = match register {
+                        Reg::Rd => instruction.rd,
+                        Reg::Rs => instruction.rs,
+                        Reg::Rt => instruction.rt,
+                    };
+                    write!(writer, "r{}", number)?;
+                } else {
+                    write!(writer, "#{}", instruction.immediate)?;
+                }
+            }
+        }
+    }
+    
+    writeln!(writer)?;
+    
+    Ok(())
+}
+
+fn write_instructions(writer: &mut dyn Write, instructions: &[InstructionWithLabel]) -> io::Result<()> {
+    for instruction in instructions {
+        write_instruction(writer, instruction)?;
+    }
+    Ok(())
+}
+
+fn write_data(writer: &mut dyn Write, data: &[Data]) -> io::Result<()> {
+    for datum in data {
+        match datum {
+            Data::Block(size) => writeln!(writer, ".blkw x{:x}", size)?,
+            Data::Stringz(string) => writeln!(writer, ".stringz \"{}\"", string)?,
+            Data::Word(word) => writeln!(writer, ".fill #{}", word)?,
+        }
+    }
+    Ok(())
+}
+
+fn write_block(writer: &mut dyn Write, block: &Block, constants: &HashMap<&str, i32>) -> io::Result<()> {
+    if let Some(addr) = block.addr {
+        if let BlockType::Code(_) = block.ty {
+            writeln!(writer, ".code")?;
+        } else {
+            writeln!(writer, ".data")?;
+        }
+        writeln!(writer, ".addr x{:x}", addr)?;
+    }
+    if block.aligned {
+        writeln!(writer, ".falign")?;
+    }
+    for label in &block.labels {
+        if let Some(&c) = constants.get(label) {
+            if c < 0 {
+                writeln!(writer, "{} .const #{}", label, c)?;
+            } else {
+                writeln!(writer, "{} .uconst #{}", label, c)?;
+            }
+        } else {
+            writeln!(writer, "{}:", label)?;
+        }
+    }
+    
+    match &block.ty {
+        BlockType::Code(instructions) => write_instructions(writer, instructions)?,
+        BlockType::Data(data) => write_data(writer, data)?,
+    }
+    
+    Ok(())
+}
+
+pub fn write_blocks(writer: &mut dyn Write, blocks: &[Block], constants: &HashMap<&str, i32>) -> io::Result<()> {
+    for (_, block) in blocks.into_iter().enumerate() {
+        write_block(writer, block, constants)?;
+    }
+    
+    Ok(())
+}
+
+pub fn print_blocks(blocks: &[Block], constants: &HashMap<&str, i32>) -> io::Result<()> {
+    write_blocks(&mut io::stdout().lock(), blocks, constants)
+}
+
 #[derive(PartialEq)]
 enum Section {
     Code,
     Data,
 }
 
+#[derive(Clone, Copy, Debug)]
 enum Reg {
     Rd,
     Rs,
     Rt,
 }
 
+#[derive(Clone, Copy, Debug)]
 enum Operand {
     Register {
         register: Reg
@@ -68,7 +177,7 @@ pub struct Parser<'a> {
     next_token: usize,
     section: Section,
     in_os_mode: bool,
-    constants: HashMap<&'a str, LiteralType>
+    pub constants: HashMap<&'a str, i32>
 }
 
 impl<'a> Parser<'a> {
@@ -100,10 +209,17 @@ impl<'a> Parser<'a> {
             ty: if self.section == Section::Code { BlockType::Code(vec![]) } else { BlockType::Data(vec![]) },
         }
     }
+    
+    fn get_directive_arg(&mut self, directive_type: DirectiveType) -> Result<Token<'a>, String> {
+        let next = self.consume();
+        match next {
+            Some(n) => Ok(n),
+            None => return Err(directive_error(directive_type, None)),
+        }
+    }
 
     fn parse_directives(&mut self, block: &mut Block<'a>) -> Result<(), String> {
         while let Some(peek) = self.peek() {
-            // println!("DIRECTIVE LOOP {:?}", peek);
 
             let dt = if let TokenType::Directive(dt) = peek.ty {
                 dt
@@ -131,16 +247,13 @@ impl<'a> Parser<'a> {
                     self.consume();
                 }
                 DirectiveType::Addr => {
-                    self.consume();
-                    let addr = match self.consume() {
-                        Some(a) => a,
-                        None => return Err("Expected an address after a .addr directive.".to_string()),
-                    };
+                    let _directive = self.consume();
+                    let addr = self.get_directive_arg(dt)?;
                     
                     let addr = match addr.ty {
                         TokenType::Literal(LiteralType::Unsigned(val)) => val,
                         TokenType::Identifier(Identifier::Hex(val)) => val,
-                        _ => return Err(format!("Expected an unsigned literal after .addr directive, but found '{}'.", addr.chars)),
+                        _ => return Err(directive_error(dt, Some(&addr))),
                     };
                     
                     block.addr = Some(addr);
@@ -154,7 +267,6 @@ impl<'a> Parser<'a> {
     
     fn parse_labels(&mut self, block: &mut Block<'a>) -> Result<(), String> {
         while let Some(peek) = self.peek() {
-            // println!("LABEL LOOP {:?}", peek);
 
             let label = if let TokenType::Identifier(_) = peek.ty {
                 self.consume().unwrap()
@@ -175,47 +287,20 @@ impl<'a> Parser<'a> {
                     self.consume();
                     continue;
                 }
-                TokenType::Directive(DirectiveType::Const) => {
+                TokenType::Directive(ty @ (DirectiveType::Const | DirectiveType::Uconst)) => {
+
                     let _directive = self.consume().unwrap();
-                    let num = if let Some(n) = self.consume() {
-                        n
-                    } else {
-                        return Err("Expected a signed constant literal after .const directive, but found end of file.".to_string());
-                    };
+                    let num = self.get_directive_arg(ty)?;
 
                     let val = match num.ty {
-                        TokenType::Literal(LiteralType::Signed(val)) => val,
-                        _ => return Err(format!("Expected a signed constant literal after .const directive, but found '{}'.", num.chars)),
+                        TokenType::Literal(LiteralType::Signed(val))   if ty == DirectiveType::Const  => val as i32,
+                        TokenType::Literal(LiteralType::Unsigned(val)) if ty == DirectiveType::Uconst => val as i32,
+                        TokenType::Identifier(Identifier::Hex(val))    if ty == DirectiveType::Uconst => val as i32,
+                        _ => return Err(directive_error(ty, Some(&num))),
                     };
                     
-                    if let Some(old) = self.constants.insert(label.chars, LiteralType::Signed(val)) {
-                        let val = match old {
-                            LiteralType::Signed(val) => val as i32,
-                            LiteralType::Unsigned(val) => val as i32,
-                        };
-                        return Err(format!("Label '{}' is already associated with value '{}'", label.chars, val));
-                    }
-                }
-                TokenType::Directive(DirectiveType::Uconst) => {
-                    let _directive = self.consume().unwrap();
-                    let num = if let Some(n) = self.consume() {
-                        n
-                    } else {
-                        return Err("Expected an unsigned constant literal after .uconst directive, but found end of file.".to_string());
-                    };
-
-                    let val = match num.ty {
-                        TokenType::Literal(LiteralType::Unsigned(val)) => val,
-                        TokenType::Identifier(Identifier::Hex(val)) => val,
-                        _ => return Err(format!("Expected an unsigned constant literal after .uconst directive, but found '{}'.", num.chars)),
-                    };
-
-                    if let Some(old) = self.constants.insert(label.chars, LiteralType::Unsigned(val)) {
-                        let val = match old {
-                            LiteralType::Signed(val) => val as i32,
-                            LiteralType::Unsigned(val) => val as i32,
-                        };
-                        return Err(format!("Label '{}' is already associated with value '{}'", label.chars, val));
+                    if let Some(old) = self.constants.insert(label.chars, val) {
+                        return Err(format!("Label '{}' is already associated with value '{}'", label.chars, old));
                     }
                 }
                 _ => {},
@@ -228,7 +313,6 @@ impl<'a> Parser<'a> {
     
     fn parse_data(&mut self, data: &mut Vec<Data<'a>>) -> Result<(), String> {
         while let Some(peek) = self.peek() {
-            // println!("DATA LOOP {:?}", peek);
 
             let dt = if let TokenType::Directive(dt) = peek.ty {
                 dt
@@ -239,16 +323,12 @@ impl<'a> Parser<'a> {
             match dt {
                 DirectiveType::Blkw => {
                     let _blkw = self.consume().unwrap();
-                    let num = if let Some(n) = self.consume() {
-                        n
-                    } else {
-                        return Err("Expected an unsigned constant literal after .blkw directive, but found end of file.".to_string());
-                    };
+                    let num = self.get_directive_arg(dt)?;
 
                     let size = match num.ty {
                         TokenType::Literal(LiteralType::Unsigned(val)) => val,
                         TokenType::Identifier(Identifier::Hex(val)) => val,
-                        _ => return Err(format!("Expected an unsigned constant literal after .blkw directive, but found '{}'.", num.chars)),
+                        _ => return Err(directive_error(dt, Some(&num))),
                     };
                     
                     data.push(Data::Block(size));
@@ -256,22 +336,18 @@ impl<'a> Parser<'a> {
                 
                 DirectiveType::Fill => {
                     let _fill = self.consume().unwrap();
-                    let num = if let Some(n) = self.consume() {
-                        n
-                    } else {
-                        return Err("Expected a signed constant literal after .fill directive, but found end of file.".to_string());
-                    };
+                    let num = self.get_directive_arg(dt)?;
 
                     let val = match num.ty {
                         TokenType::Identifier(Identifier::Hex(val)) => val as i16,
                         TokenType::Literal(LiteralType::Signed(val)) => val as i16,
                         TokenType::Literal(LiteralType::Unsigned(val)) => {
                             if val as i32 > i16::MAX as i32 {
-                                return Err("Literal '{}' after .fill directive is too big to fit in a signed 16-bit number.".to_string());
+                                return Err(format!("Literal '{}' after .fill directive is too big to fit in a signed 16-bit number.", num.chars));
                             }
                             val as i16
                         }
-                        _ => return Err(format!("Expected a signed constant literal after .fill directive, but found '{}'.", num.chars)),
+                        _ => return Err(directive_error(dt, Some(&num))),
                     };
                     
                     data.push(Data::Word(val));
@@ -279,16 +355,12 @@ impl<'a> Parser<'a> {
                 
                 DirectiveType::Stringz => {
                     let _stringz = self.consume().unwrap();
-                    let string = if let Some(s) = self.consume() {
-                        s
-                    } else {
-                        return Err("Expected a string after .stringz directive, but found end of file.".to_string());
-                    };
+                    let string = self.get_directive_arg(dt)?;
                     
                     let contents = if let TokenType::String(s) = string.ty {
                         s
                     } else {
-                        return Err(format!("Expected a string after .stringz directive, but found '{}'.", string.chars));
+                        return Err(directive_error(dt, Some(&string)));
                     };
 
                     data.push(Data::Stringz(contents));
@@ -297,13 +369,14 @@ impl<'a> Parser<'a> {
             }
         }
 
-        Ok(())
+        return Ok(());
+        
     }
     
     fn parse_instruction(&mut self, ty: InstructionType, specs: &[Operand]) -> Result<InstructionWithLabel<'a>, String> {
 
-        let mut instruction = InstructionWithLabel { ty, rd: 0, rt: 0, rs: 0, immediate: 0, label: None };
-        for (i, spec) in specs.into_iter().enumerate() {
+        let mut instruction = InstructionWithLabel { ty, rd: -1, rt: -1, rs: -1, immediate: i32::MAX, label: None };
+        for (i, &spec) in specs.into_iter().enumerate() {
             
             if i != 0 {
                 let c = self.consume();
@@ -315,7 +388,7 @@ impl<'a> Parser<'a> {
             let token = if let Some(t) = self.consume() {
                 t
             } else {
-                return Err(format!("Instruction '{}' expects a {} as its {} operand, but found nothing.", ty, op_err_str(spec), number(i + 1)));
+                return Err(format!("Instruction '{}' expects a {} as its {} operand, but found end of file.", ty, op_err_str(spec), number(i + 1)));
             };
                     
             match spec {
@@ -323,89 +396,94 @@ impl<'a> Parser<'a> {
                     let r = if let TokenType::Identifier(Identifier::Register(r)) = token.ty {
                         r
                     } else {
-                        return Err(format!("Instruction '{}' expects a {} as its {} operand, but found '{}'.", ty, op_err_str(spec), number(i + 1), token.chars));
+                        return Err(error(&instruction, i, spec, token.chars));
                     };
                     
                     use Reg::*;
                     match register {
-                        Rd => instruction.rd = r,
-                        Rs => instruction.rs = r,
-                        Rt => instruction.rt = r,
+                        Rd => instruction.rd = r as i8,
+                        Rs => instruction.rs = r as i8,
+                        Rt => instruction.rt = r as i8,
                     }
                 },
                 Operand::Label => {
                     if let TokenType::Identifier(_) = token.ty {
                     } else {
-                        return Err(format!("Instruction '{}' expects a {} as its {} operand, but found '{}'.", ty, op_err_str(spec), number(i + 1), token.chars));
+                        return Err(error(&instruction, i, spec, token.chars));
                     };
                     
                     instruction.label = Some(token.chars);
                 },
-                Operand::Immediate { signed, bits } => {
-                    let lit_value = match token.ty {
-                        TokenType::Literal(lt) => lt.to_i32(),
-                        TokenType::Identifier(Identifier::Hex(h)) => h as i32,
-                        _ => return Err(format!("Instruction '{}' expects a {} as its {} operand, but found '{}'.", ty, op_err_str(spec), number(i + 1), token.chars)),
-                    };
-                    
-                    if !signed && lit_value < 0 {
-                        return Err(format!("Instruction '{}' expects an unsigned immediate value as its {} operand, but '{}' is signed.", ty, number(i + 1), token.chars));
-                    }
-                    
-                    if !number_fits(lit_value, *signed, *bits) {
-                        let signedness = if *signed {
-                            "a signed"
-                        } else {
-                            "an unsigned"
-                        };
-                        return Err(format!("Instruction '{}' expects {} {}-bit immediate value as its {} operand, but '{}' cannot fit into {} bits.", ty, signedness, bits, number(i + 1), token.chars, bits));
-                    }
-                    
-                    instruction.immediate = lit_value;
-                    
-                },
+                Operand::Immediate { signed, bits } => immediate(i, spec, token, signed, bits, &mut instruction)?,
                 Operand::RegisterOrImmediate { register, signed, bits } => {
 
-                    // @Todo cutnpaste -> functions
-                    
                     if let TokenType::Identifier(Identifier::Register(r)) = token.ty {
                         use Reg::*;
                         match register {
-                            Rd => instruction.rd = r,
-                            Rs => instruction.rs = r,
-                            Rt => instruction.rt = r,
+                            Rd => instruction.rd = r as i8,
+                            Rs => instruction.rs = r as i8,
+                            Rt => instruction.rt = r as i8,
                         }
                         continue;
                     }
-                    let lit_value = match token.ty {
-                        TokenType::Literal(lit_type) => lit_type.to_i32(),
-                        TokenType::Identifier(Identifier::Hex(h)) => h as i32,
-                        _ => return Err(format!("Instruction '{}' expects a {} as its {} operand, but found '{}'.", ty, op_err_str(spec), number(i + 1), token.chars)),
-                    };
-
-                    if !signed && lit_value < 0 {
-                        return Err(format!("Instruction '{}' expects an unsigned immediate value as its {} operand, but '{}' is signed.", ty, number(i + 1), token.chars));
-                    }
-                    
-                    if !number_fits(lit_value, *signed, *bits) {
-                        let signedness = if *signed {
-                            "a signed"
-                        } else {
-                            "an unsigned"
-                        };
-                        return Err(format!("Instruction '{}' expects {} {}-bit immediate value as its {} operand, but '{}' cannot fit into {} bits.", ty, signedness, bits, number(i + 1), token.chars, bits));
-                    }
-
-                    instruction.immediate = lit_value;
+                    immediate(i, spec, token, signed, bits, &mut instruction)?
                 },
             }
         }
-        Ok(instruction)
+
+        return Ok(instruction);
+        
+        fn error(instruction: &InstructionWithLabel, i: usize, spec: Operand, chars: &str) -> String {
+            format!("Instruction '{}' expects a {} as its {} operand, but found '{}'.", instruction.ty, op_err_str(spec), number(i + 1), chars)
+        }
+
+        fn number(i: usize) -> &'static str {
+            match i {
+                1 => "first",
+                2 => "second",
+                3 => "third",
+                _ => panic!("internal error: passed {} to number", i),
+            }
+        }
+
+        fn op_err_str(op: Operand) -> &'static str {
+            use Operand::*;
+            
+            match op {
+                Register { ..} => "register",
+                Label => "label",
+                Immediate { .. } => "immediate value",
+                RegisterOrImmediate { .. } => "register or immediate value",
+            }
+        }
+
+        fn immediate(i: usize, spec: Operand, token: Token<'_>, signed: bool, bits: u8, instruction: &mut InstructionWithLabel) -> Result<(), String> {
+            let lit_value = match token.ty {
+                TokenType::Literal(lt) => lt.to_i32(),
+                TokenType::Identifier(Identifier::Hex(h)) => h as i32,
+                _ => return Err(error(instruction, i, spec, token.chars)),
+            };
+            
+            if !signed && lit_value < 0 {
+                return Err(format!("Instruction '{}' expects an unsigned immediate value as its {} operand, but '{}' is signed.", instruction.ty, number(i + 1), token.chars));
+            }
+            
+            if !number_fits(lit_value, signed, bits) {
+                let signedness = if signed {
+                    "a signed"
+                } else {
+                    "an unsigned"
+                };
+                return Err(format!("Instruction '{}' expects {} {}-bit immediate value as its {} operand, but '{}' cannot fit into {} bits.", instruction.ty, signedness, bits, number(i + 1), token.chars, bits));
+            }
+            
+            instruction.immediate = lit_value;
+            Ok(())
+        }
     }
     
     fn parse_instructions(&mut self, instructions: &mut Vec<InstructionWithLabel<'a>>) -> Result<(), String> {
         while let Some(i) = self.peek() {
-            // println!("INSTRUCTION LOOP {:?}", i);
 
             let instruction_type = if let TokenType::Instruction(it) = i.ty {
                 it
@@ -415,73 +493,10 @@ impl<'a> Parser<'a> {
             
             self.consume();
             
-            use InstructionType::*;
-            use Operand::*;
-            let specs: &[Operand] = match instruction_type {
-                Nop | Ret | Rti => &[],
-                Brp | Brz | Brzp | Brn | Brnp | Brnz | Brnzp | Jsr | Jmp => &[Label],
-                Lea | Lc => &[
-                    Register { register: Reg::Rd }, 
-                    Label,
-                ],
-                And | Add => &[
-                    Register { register: Reg::Rd },
-                    Register { register: Reg::Rs },
-                    RegisterOrImmediate { register: Reg::Rt, signed: true, bits: 5 },
-                ],
-                Mul | Sub | Div | Mod | Or | Xor => &[
-                    Register { register: Reg::Rd },
-                    Register { register: Reg::Rs },
-                    Register { register: Reg::Rt },
-                ],
-                Sll | Sra | Srl => &[
-                    Register { register: Reg::Rd },
-                    Register { register: Reg::Rs },
-                    Immediate { signed: false, bits: 4 },
-                ],
-                Not => &[
-                    Register { register: Reg::Rd },
-                    Register { register: Reg::Rs },
-                ],
-                Ldr => &[
-                    Register { register: Reg::Rd },
-                    Register { register: Reg::Rs },
-                    Immediate { signed: true, bits: 6 },
-                ],
-                Str => &[
-                    Register { register: Reg::Rt },
-                    Register { register: Reg::Rs },
-                    Immediate { signed: true, bits: 6 },
-                ],
-                Const => &[
-                    Register { register: Reg::Rd },
-                    Immediate { signed: true, bits: 9 },
-                ],
-                Hiconst => &[
-                    Register { register: Reg::Rd },
-                    Immediate { signed: false, bits: 8 },
-                ],
-                Cmp | Cmpu => &[
-                    Register { register: Reg::Rs },
-                    Register { register: Reg::Rt },
-                ],
-                Cmpi => &[
-                    Register { register: Reg::Rs },
-                    Immediate { signed: true, bits: 7 },
-                ],
-                Cmpiu => &[
-                    Register { register: Reg::Rs },
-                    Immediate { signed: false, bits: 7 },
-                ],
-                Jsrr | Jmpr => &[
-                    Register { register: Reg::Rs },
-                ],
-                Trap => &[
-                    Immediate { signed: false, bits: 8 },
-                ],
-            };
+            let ops = &mut [Operand::Label; 3];
+            let ops = instruction_operands(instruction_type, &mut ops[..]);
             
-            let instruction = self.parse_instruction(instruction_type, specs);
+            let instruction = self.parse_instruction(instruction_type, ops);
             
             let instruction = match instruction {
                 Ok(i) => i,
@@ -520,31 +535,11 @@ impl<'a> Parser<'a> {
     }
 }
 
-impl<'a> Iterator for Parser<'a> {
+impl<'a> Iterator for &mut Parser<'a> {
     type Item = Result<Block<'a>, String>;
     
     fn next(&mut self) -> Option<Self::Item> {
         self.next_block()
-    }
-}
-
-fn op_err_str(op: &Operand) -> &'static str {
-    use Operand::*;
-    
-    match op {
-        Register { ..} => "register",
-        Label => "label",
-        Immediate { .. } => "immediate value",
-        RegisterOrImmediate { .. } => "register or immediate value",
-    }
-}
-
-fn number(i: usize) -> &'static str {
-    match i {
-        1 => "first",
-        2 => "second",
-        3 => "third",
-        _ => panic!("internal error: passed {} to number", i),
     }
 }
 
@@ -557,4 +552,95 @@ fn number_fits(i: i32, signed: bool, bits: u8) -> bool {
         max -= change;
     }
     i >= min && i < max
+}
+
+fn directive_error(directive: DirectiveType, found: Option<&Token>) -> String {
+    use DirectiveType::*;
+    let (es, ds) = match directive {
+        Addr => ("an unsigned integer", "addr"),
+        Const => ("a signed integer", "const"),
+        Uconst => ("an unsigned integer", "uconst"),
+        Fill => ("a signed integer", "fill"),
+        Blkw => ("an unsigned integer", "blkw"),
+        Stringz => ("a string", "stringz"),
+        _ => unreachable!("directive {:?} has no arguments", directive),
+    };
+    match found {
+        Some(f) => format!("Expected {} after .{} directive, but found '{}'.", es, ds, f.chars),
+        None =>    format!("Expected {} after .{} directive, but found end of file.", es, ds),
+    }
+}
+
+
+fn instruction_operands(instruction_type: InstructionType, ops: &mut[Operand]) -> &[Operand] {
+    use InstructionType::*;
+    use Operand::*;
+    use Reg::*;
+    let specs: &'static [Operand] = match instruction_type {
+        Nop | Ret | Rti => &[],
+        Brp | Brz | Brzp | Brn | Brnp | Brnz | Brnzp | Jsr | Jmp => &[Label],
+        Lea | Lc => &[
+            Register { register: Rd }, 
+            Label,
+        ],
+        And | Add => &[
+            Register { register: Rd },
+            Register { register: Rs },
+            RegisterOrImmediate { register: Rt, signed: true, bits: 5 },
+        ],
+        Mul | Sub | Div | Mod | Or | Xor => &[
+            Register { register: Rd },
+            Register { register: Rs },
+            Register { register: Rt },
+        ],
+        Sll | Sra | Srl => &[
+            Register { register: Rd },
+            Register { register: Rs },
+            Immediate { signed: false, bits: 4 },
+        ],
+        Not => &[
+            Register { register: Rd },
+            Register { register: Rs },
+        ],
+        Ldr => &[
+            Register { register: Rd },
+            Register { register: Rs },
+            Immediate { signed: true, bits: 6 },
+        ],
+        Str => &[
+            Register { register: Rt },
+            Register { register: Rs },
+            Immediate { signed: true, bits: 6 },
+        ],
+        Const => &[
+            Register { register: Rd },
+            Immediate { signed: true, bits: 9 },
+        ],
+        Hiconst => &[
+            Register { register: Rd },
+            Immediate { signed: false, bits: 8 },
+        ],
+        Cmp | Cmpu => &[
+            Register { register: Rs },
+            Register { register: Rt },
+        ],
+        Cmpi => &[
+            Register { register: Rs },
+            Immediate { signed: true, bits: 7 },
+        ],
+        Cmpiu => &[
+            Register { register: Rs },
+            Immediate { signed: false, bits: 7 },
+        ],
+        Jsrr | Jmpr => &[
+            Register { register: Rs },
+        ],
+        Trap => &[
+            Immediate { signed: false, bits: 8 },
+        ],
+    };
+    for i in 0..specs.len() {
+        ops[i] = specs[i];
+    }
+    &ops[..specs.len()]
 }

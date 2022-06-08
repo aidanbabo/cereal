@@ -219,12 +219,13 @@ impl<'a> Lexer<'a> {
         }
     }
     
-    fn span(&mut self) -> Span {
-        Span {
+    fn span(&mut self) -> (Span, &'a str) {
+        let span = Span {
             start: self.token_start,
             end: self.char_iter.peek_position(),
             line: self.line,
-        }
+        };
+        (span, &self.input[span.start..span.end])
     }
     
     fn consume_while(&mut self, f: impl Fn(char) -> bool) {
@@ -260,8 +261,7 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        let span = self.span();
-        let chars = &self.input[span.start..span.end];
+        let (span, chars) = self.span();
         let ty = if let Some(ty) = directive_type(&chars[1..]) {
             TokenType::Directive(ty)
         } else {
@@ -290,8 +290,7 @@ impl<'a> Lexer<'a> {
             return Err(String::from("Expected space after decimal literal."));
         }
 
-        let span = self.span();
-        let chars = &self.input[span.start..span.end];
+        let (span, chars) = self.span();
         let mut value_text = chars;
         if leading_pound { 
             value_text = &value_text[1..];
@@ -303,11 +302,9 @@ impl<'a> Lexer<'a> {
                     let token = Token { span, chars, ty: TokenType::Literal(LiteralType::Unsigned(v)) };
                     return Ok(token);
                 },
-                Err(e) => {
-                    match e.kind() {
-                        std::num::IntErrorKind::PosOverflow => return Err(format!("{} is too large to fit in a 16 bit unsigned integer.", value_text)),
-                        _ => panic!("Internal integer parse error {:?} on text '{}'.", e, value_text),
-                    }
+                Err(e) => match e.kind() {
+                    std::num::IntErrorKind::PosOverflow => return Err(format!("{} is too large to fit in a 16 bit unsigned integer.", value_text)),
+                    _ => panic!("Internal integer parse error {:?} on text '{}'.", e, value_text),
                 }
             };
         } else {
@@ -316,12 +313,10 @@ impl<'a> Lexer<'a> {
                     let token = Token { span, chars, ty: TokenType::Literal(LiteralType::Signed(v)) };
                     return Ok(token);
                 },
-                Err(e) => {
-                    match e.kind() {
-                        std::num::IntErrorKind::PosOverflow => return Err(format!("{} is too large to fit in a 16 bit signed integer.", value_text)),
-                        std::num::IntErrorKind::NegOverflow => return Err(format!("{} is too small to fit in a 16 bit signed integer.", value_text)),
-                        _ => panic!("Internal integer parse error {:?} on text '{}'.", e, value_text),
-                    }
+                Err(e) => match e.kind() {
+                    std::num::IntErrorKind::PosOverflow => return Err(format!("{} is too large to fit in a 16 bit signed integer.", value_text)),
+                    std::num::IntErrorKind::NegOverflow => return Err(format!("{} is too small to fit in a 16 bit signed integer.", value_text)),
+                    _ => panic!("Internal integer parse error {:?} on text '{}'.", e, value_text),
                 }
             };
         }
@@ -329,8 +324,7 @@ impl<'a> Lexer<'a> {
     }
     
     fn single_char(&mut self, ty: TokenType<'a>) -> Result<Token<'a>, String> {
-        let span = self.span();
-        let chars = &self.input[span.start..span.end];
+        let (span, chars) = self.span();
         let token = Token { span, chars, ty };
         Ok(token)
     }
@@ -360,8 +354,7 @@ impl<'a> Lexer<'a> {
             return Err("Expected closing '\"' in string literal.".to_string());
         }
 
-        let span = self.span();
-        let chars = &self.input[span.start..span.end];
+        let (span, chars) = self.span();
         let contents = &chars[1..chars.len() - 1];
         let contents = if contents.contains('\\') {
             let mut string = String::new();
@@ -393,18 +386,15 @@ impl<'a> Lexer<'a> {
     
     fn identifier(&mut self, could_be_hex: bool, could_be_register: bool) -> Result<Token<'a>, String> {
         self.consume_while(is_identifier);
-        let span = self.span();
-        let chars = &self.input[span.start..span.end];
+        let (span, chars) = self.span();
 
         if could_be_hex && chars[1..].chars().all(is_hex) {
             let value_text = &chars[1..];
             let value = match u16::from_str_radix(value_text, 16) {
                 Ok(v) => v,
-                Err(e) => {
-                    match e.kind() {
-                        std::num::IntErrorKind::PosOverflow => return Err(format!("{} is too large to fit in 16 bits.", value_text)),
-                        _ => panic!("Internal integer parse error {:?} on text '{}'.", e, value_text),
-                    }
+                Err(e) => match e.kind() {
+                    std::num::IntErrorKind::PosOverflow => return Err(format!("{} is too large to fit in 16 bits.", value_text)),
+                    _ => panic!("Internal integer parse error {:?} on text '{}'.", e, value_text),
                 }
             };
 
@@ -417,11 +407,9 @@ impl<'a> Lexer<'a> {
             let value_text = &chars[1..];
             let value = match u8::from_str_radix(value_text, 10) {
                 Ok(v) => v,
-                Err(e) => {
-                    match e.kind() {
-                        std::num::IntErrorKind::PosOverflow => return Err(format!("No such register '{}'.", value_text)),
-                        _ => panic!("Internal integer parse error {:?} on text '{}'.", e, value_text),
-                    }
+                Err(e) => match e.kind() {
+                    std::num::IntErrorKind::PosOverflow => return Err(format!("No such register '{}'.", value_text)),
+                    _ => panic!("Internal integer parse error {:?} on text '{}'.", e, value_text),
                 }
             };
             if value >= 8 {
@@ -459,8 +447,8 @@ impl<'a> Lexer<'a> {
                 '"' => return Some(self.string()),
                 _ => {
                     self.consume_while(|c| !is_token_delimeter(c));
-                    let span = self.span();
-                    return Some(Err(format!("Unexpected '{}'.", &self.input[span.start..span.end])));
+                    let (_, chars) = self.span();
+                    return Some(Err(format!("Unexpected '{}'.", chars)));
                 }
             }
         }
