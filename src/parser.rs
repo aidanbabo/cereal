@@ -35,6 +35,15 @@ pub struct Block<'a> {
     pub ty: BlockType<'a>,
 }
 
+impl<'a> Block<'a> {
+    fn is_empty(&self) -> bool {
+        self.addr.is_none() && self.labels.is_empty() && match &self.ty {
+            BlockType::Code(instructions) => instructions.is_empty(),
+            BlockType::Data(data) => data.is_empty(),
+        }
+    }
+}
+
 use std::io::{self, Write};
 
 fn write_instruction(writer: &mut dyn Write, instruction: &InstructionWithLabel) -> io::Result<()> {
@@ -136,7 +145,7 @@ fn write_block(writer: &mut dyn Write, block: &Block, constants: &HashMap<&str, 
 pub fn write_blocks(writer: &mut dyn Write, blocks: &[Block], constants: &HashMap<&str, i32>) -> io::Result<()> {
     for (i, block) in blocks.into_iter().enumerate() {
         if i != 0 {
-            println!();
+            writeln!(writer)?;
         }
         write_block(writer, block, constants)?;
     }
@@ -384,10 +393,10 @@ impl<'a> Parser<'a> {
         let mut instruction = InstructionWithLabel { ty, rd: -1, rt: -1, rs: -1, immediate: i32::MAX, label: None };
         for (i, &spec) in specs.into_iter().enumerate() {
             
-            if i != 0 {
-                let c = self.consume();
-                if c.is_none() || c.unwrap().ty != TokenType::Comma {
-                    return Err(format!("Missing comma after {} operand", number(i)));
+            // optional comma
+            if let Some(c) = self.peek() {
+                if let TokenType::Comma = c.ty {
+                    self.consume();
                 }
             }
 
@@ -518,7 +527,7 @@ impl<'a> Parser<'a> {
         if self.peek().is_none() {
             return None;
         }
-
+        
         let mut block = self.new_block();
         if let Err(e) = self.parse_directives(&mut block) {
             return Some(Err(e));
@@ -537,7 +546,12 @@ impl<'a> Parser<'a> {
             return Some(Err(e));
         }
         
-        Some(Ok(block))
+        if block.is_empty() {
+            Some(Err(format!("Empty block!")))
+        } else {
+            Some(Ok(block))
+        }
+        
     }
 }
 

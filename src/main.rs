@@ -47,8 +47,8 @@ fn main() {
     // println!();
 
     if !errors.is_empty() {
-        for error in errors {
-            println!("ERROR in file {:?}: {}", &args.path, error);
+        for (line, error) in errors {
+            println!("ERROR in file {:?} on line {}: {}", &args.path, line, error);
         }
         return;
     }
@@ -67,7 +67,7 @@ fn main() {
     for block in &mut parser {
         match block {
             Ok(block) => if errors.is_empty() { blocks.push(block) },
-            Err(error) => errors.push(error),
+            Err(error) => { errors.push(error); break; } ,
         }
     }
     

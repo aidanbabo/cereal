@@ -24,7 +24,7 @@ pub enum DirectiveType {
 }
 
 /// Hex Literals and Registers could be confused for labels and vice versa, so we parse identifiers
-/// as though they could be either if they lead with an 'r' or an 'h'
+/// as though they could be either if they lead with an 'r' or an 'x'
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Identifier {
     Hex(u16),
@@ -209,7 +209,7 @@ pub struct Lexer<'a> {
     input: &'a str,
     char_iter: CharIter<'a>,
     token_start: usize,
-    line: usize,
+    pub line: usize,
 }
 
 impl<'a> Lexer<'a> {
@@ -388,6 +388,28 @@ impl<'a> Lexer<'a> {
         Ok(token)
     }
     
+    fn hex(&mut self) -> Result<Token<'a>, String> {
+        self.consume_while(is_hex);
+
+        if !self.check(is_not_token) {
+            return Err(String::from("Expected space after hex literal."));
+        }
+
+        let (span, chars) = self.span();
+        
+        let value_text = &chars[2..];
+        let value = match u16::from_str_radix(value_text, 16) {
+            Ok(v) => v,
+            Err(e) => match e.kind() {
+                std::num::IntErrorKind::PosOverflow => return Err(format!("{} is too large to fit in 16 bits.", value_text)),
+                _ => panic!("Internal integer parse error {:?} on text '{}'.", e, value_text),
+            }
+        };
+
+        let token = Token { span, chars, ty: TokenType::Literal(LiteralType::Unsigned(value)) };
+        Ok(token)
+    }
+    
     fn identifier(&mut self, could_be_hex: bool, could_be_register: bool) -> Result<Token<'a>, String> {
         self.consume_while(is_identifier);
         let (span, chars) = self.span();
@@ -444,7 +466,15 @@ impl<'a> Lexer<'a> {
                 ':' => return Some(self.single_char(TokenType::Colon)),
                 '.' => return Some(self.directive()),
                 '#' => return Some(self.decimal(true)),
-                c if is_decimal(c) => return Some(self.decimal(false)),
+                c if is_decimal(c) => {
+                    if let Some(c) = self.char_iter.peek() {
+                        if c == 'x' || c == 'X' {
+                            self.char_iter.consume();
+                            return Some(self.hex())
+                        }
+                    }
+                    return Some(self.decimal(false))
+                }
                 'r' | 'R' => return Some(self.identifier(false, true)),
                 'x' | 'X' => return Some(self.identifier(true, false)),
                 c if is_identifier(c) => return Some(self.identifier(false, false)),
@@ -460,9 +490,9 @@ impl<'a> Lexer<'a> {
 }
 
 impl<'a> Iterator for Lexer<'a> {
-    type Item = Result<Token<'a>, String>;
+    type Item = Result<Token<'a>, (usize, String)>;
     
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_token()
+        self.next_token().map(|t| t.map_err(|e| (self.line, e)))
     }
 }
