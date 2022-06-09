@@ -1,38 +1,38 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-use crate::InstructionType;
+use crate::{InstructionType, number_fits};
 use crate::lexer::{Token, TokenType, DirectiveType, Identifier, LiteralType};
 
-#[derive(Debug)]
-struct InstructionWithLabel<'a> {
-    ty: InstructionType,
-    rd: i8,
-    rs: i8,
-    rt: i8,
-    immediate: i32,
-    label: Option<&'a str>,
+#[derive(Clone, Copy, Debug)]
+pub struct InstructionWithLabel<'a> {
+    pub ty: InstructionType,
+    pub rd: i8,
+    pub rs: i8,
+    pub rt: i8,
+    pub immediate: i32,
+    pub label: Option<&'a str>,
 }
 
 #[derive(Debug)]
-enum Data<'a> {
+pub enum Data<'a> {
     Block(u16),
     Stringz(Cow<'a, str>),
     Word(i16),
 }
 
 #[derive(Debug)]
-enum BlockType<'a> {
+pub enum BlockType<'a> {
     Code(Vec<InstructionWithLabel<'a>>),
     Data(Vec<Data<'a>>),
 }
 
 #[derive(Debug)]
 pub struct Block<'a> {
-    addr: Option<u16>,
-    aligned: bool,
-    labels: Vec<&'a str>,
-    ty: BlockType<'a>,
+    pub addr: Option<u16>,
+    pub aligned: bool,
+    pub labels: Vec<&'a str>,
+    pub ty: BlockType<'a>,
 }
 
 use std::io::{self, Write};
@@ -50,7 +50,10 @@ fn write_instruction(writer: &mut dyn Write, instruction: &InstructionWithLabel)
         }
         
         match op {
-            Operand::Label => write!(writer, "{}", instruction.label.unwrap())?,
+            Operand::Label => match instruction.label {
+                Some(label) => write!(writer, "{}", label)?,
+                None => write!(writer, "#{}", instruction.immediate)?,
+            }
             Operand::Register { register } => {
                 let number = match register {
                     Reg::Rd => instruction.rd,
@@ -131,7 +134,10 @@ fn write_block(writer: &mut dyn Write, block: &Block, constants: &HashMap<&str, 
 }
 
 pub fn write_blocks(writer: &mut dyn Write, blocks: &[Block], constants: &HashMap<&str, i32>) -> io::Result<()> {
-    for (_, block) in blocks.into_iter().enumerate() {
+    for (i, block) in blocks.into_iter().enumerate() {
+        if i != 0 {
+            println!();
+        }
         write_block(writer, block, constants)?;
     }
     
@@ -543,17 +549,6 @@ impl<'a> Iterator for &mut Parser<'a> {
     }
 }
 
-fn number_fits(i: i32, signed: bool, bits: u8) -> bool {
-    let mut min = 0;
-    let mut max = 1 << bits;
-    if signed {
-        let change = 1 << (bits - 1);
-        min -= change;
-        max -= change;
-    }
-    i >= min && i < max
-}
-
 fn directive_error(directive: DirectiveType, found: Option<&Token>) -> String {
     use DirectiveType::*;
     let (es, ds) = match directive {
@@ -572,7 +567,7 @@ fn directive_error(directive: DirectiveType, found: Option<&Token>) -> String {
 }
 
 
-fn instruction_operands(instruction_type: InstructionType, ops: &mut[Operand]) -> &[Operand] {
+fn instruction_operands(instruction_type: InstructionType, ops: &mut [Operand]) -> &[Operand] {
     use InstructionType::*;
     use Operand::*;
     use Reg::*;

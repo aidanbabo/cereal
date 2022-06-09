@@ -139,6 +139,10 @@ fn is_token_delimeter(c: char) -> bool {
     is_whitespace(c) || c == ',' || c == ':'
 }
 
+fn is_not_token(c: char) -> bool {
+    is_whitespace(c) || c == ';'
+}
+
 fn directive_type(s: &str) -> Option<DirectiveType> {
     use DirectiveType::*;
     match &*s.to_lowercase() {
@@ -256,7 +260,7 @@ impl<'a> Lexer<'a> {
             return Err(format!("Expected directive name after '.'."));
         } else {
             self.consume_while(is_alpha);
-            if !self.check(is_whitespace) {
+            if !self.check(is_not_token) {
                 return Err(format!("Expected space after directive name."));
             }
         }
@@ -286,7 +290,7 @@ impl<'a> Lexer<'a> {
         }
         
         self.consume_while(is_decimal);
-        if !self.check(is_whitespace) {
+        if !self.check(is_not_token) {
             return Err(String::from("Expected space after decimal literal."));
         }
 
