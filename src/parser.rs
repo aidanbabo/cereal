@@ -187,22 +187,22 @@ enum Operand {
     }
 }
 
-pub struct Parser<'a> {
+pub struct Parser<'a, 'b> {
     tokens: Vec<Token<'a>>,
     next_token: usize,
     section: Section,
     in_os_mode: bool,
-    pub constants: HashMap<&'a str, i32>
+    pub constants: &'b mut HashMap<&'a str, i32>
 }
 
-impl<'a> Parser<'a> {
-    pub fn new(tokens: Vec<Token<'a>>) -> Self {
+impl<'a, 'b> Parser<'a, 'b> {
+    pub fn new(tokens: Vec<Token<'a>>, constants: &'b mut HashMap<&'a str, i32>) -> Self {
         Parser {
             tokens,
             next_token: 0,
             section: Section::Code,
             in_os_mode: false,
-            constants: Default::default(),
+            constants,
         }
     }
     
@@ -555,7 +555,7 @@ impl<'a> Parser<'a> {
     }
 }
 
-impl<'a> Iterator for &mut Parser<'a> {
+impl<'a, 'b> Iterator for Parser<'a, 'b> {
     type Item = Result<Block<'a>, String>;
     
     fn next(&mut self) -> Option<Self::Item> {

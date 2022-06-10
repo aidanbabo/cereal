@@ -3,7 +3,8 @@ use std::collections::HashMap;
 pub mod lexer;
 pub mod parser;
 
-use parser::{Block, BlockType, Data, InstructionWithLabel};
+use lexer::Lexer;
+use parser::{Parser, Block, BlockType, Data, InstructionWithLabel};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InstructionType {
@@ -149,6 +150,105 @@ pub fn number_fits(i: i32, signed: bool, bits: u8) -> bool {
     i >= min && i < max
 }
 
+use std::path::Path;
+pub fn parse_string<'container, 'source>(
+    filename: &Path, 
+    string: &'source str, 
+    blocks: &'container mut Vec<Block<'source>>, 
+    constants: &'container mut HashMap<&'source str, i32>
+) -> Result<(), ()> 
+    {
+    let lexer = Lexer::new(string);
+    
+    let mut tokens = vec![];
+    let mut errors = vec![];
+    
+    // println!("SOURCE:");
+    // println!("{}", string);
+
+    for token in lexer {
+        match token {
+            Ok(token) => if errors.is_empty() { tokens.push(token) },
+            Err(error) => errors.push(error),
+        }
+    }
+    
+    // println!();
+    if !errors.is_empty() {
+        for (line, error) in errors {
+            println!("ERROR in file {:?} on line {}: {}", filename, line, error);
+        }
+        return Err(());
+    }
+
+    /*
+    println!("TOKENS:");
+    for token in &tokens {
+        println!("{:?}", token);
+    }
+    */
+    
+    let parser = Parser::new(tokens, constants);
+    
+    let mut errors = vec![];
+    for block in parser {
+        match block {
+            Ok(block) => if errors.is_empty() { blocks.push(block) },
+            Err(error) => { errors.push(error); break; } ,
+        }
+    }
+    
+    // println!();
+
+    if !errors.is_empty() {
+        for error in errors {
+            println!("ERROR in file {:?}: {}", filename, error);
+        }
+        return Err(());
+    }
+
+    /*
+    println!("BLOCKS:");
+    for block in &blocks {
+        println!("{:?}", block);
+    }
+    */
+    
+    Ok(())
+}
+
+pub fn compile_and_link(blocks: &mut [Block], constants: &HashMap<&str, i32>) -> Result<Vec<u8>, ()> {
+    
+    // println!("PRINTED:");
+    // cereal::parser::print_blocks(&blocks, &parser.constants).unwrap();
+    
+    if let Err(errors) = expand_psuedo_instructions(blocks, constants) {
+        for error in errors {
+            println!("ERROR: {}", error);
+        }
+        return Err(());
+    }
+    
+    // println!("EXPANDED:");
+    // cereal::parser::print_blocks(&blocks, &parser.constants).unwrap();
+
+    let labels = match patch(blocks) {
+        Ok(labels) => labels,
+        Err(errors) => {
+            for error in errors {
+                println!("ERROR: {}", error);
+            }
+            return Err(());
+        }
+    };
+
+    // println!("PATCHED:");
+    // cereal::parser::print_blocks(&blocks, &parser.constants).unwrap();
+    
+    let bytes = write_object_code(&blocks, &labels);
+    Ok(bytes)
+}
+
 pub fn expand_psuedo_instructions(blocks: &mut [Block], constants: &HashMap<&str, i32>) -> Result<(), Vec<String>> {
     
     let mut errors = vec![];
@@ -208,7 +308,7 @@ pub fn patch<'a>(blocks: &mut [Block<'a>]) -> Result<HashMap<&'a str, u16>, Vec<
     let mut addresses = HashMap::new();
     let mut errors = vec![];
     let mut code_addr = 0;
-    let mut data_addr = 0;
+    let mut data_addr = 0x2000;
     
     for block in &mut* blocks {
         let (addr, size) = match &block.ty {
@@ -238,6 +338,11 @@ pub fn patch<'a>(blocks: &mut [Block<'a>]) -> Result<HashMap<&'a str, u16>, Vec<
         
         block.addr = Some(*addr);
         
+        if let BlockType::Data(_) = &block.ty {
+            println!("{:?}", block.labels);
+            println!("{:x}", block.addr.unwrap());
+        }
+        
         for label in &block.labels {
             if let Some(old_addr) = addresses.insert(*label, *addr) {
                 errors.push(format!("Label '{}' is already defined at address {:x}", label, old_addr));
@@ -264,7 +369,7 @@ pub fn patch<'a>(blocks: &mut [Block<'a>]) -> Result<HashMap<&'a str, u16>, Vec<
                                 instruction.immediate = (*address) as i32 - current - 1;
                                 if !number_fits(instruction.immediate, true, if matches!(instruction.ty, Jmp) { 11 } else { 9 }) {
                                     // @Todo Idk what more to say, but this feels like a shitty error message
-                                    errors.push(format!("Jump to label '{}' is too far. gap: {:x} addr: {:x} curr: {:x}", label, instruction.immediate, address, current));
+                                    errors.push(format!("Jump to label '{}' is too far.", label));
                                     continue;
                                 }
                             },
@@ -280,12 +385,8 @@ pub fn patch<'a>(blocks: &mut [Block<'a>]) -> Result<HashMap<&'a str, u16>, Vec<
                                     continue;
                                 }
                             }
-                            Const => {
-                                instruction.immediate = (*address as i32) & 0x1ff;
-                            }
-                            Hiconst => {
-                                instruction.immediate = ((*address as i32) & 0xff00) >> 8;
-                            }
+                            Const => instruction.immediate = (*address as i32) & 0x1ff,
+                            Hiconst => instruction.immediate = ((*address as i32) & 0xff00) >> 8,
                             _ => {},
                         }
                     } else {
@@ -296,7 +397,6 @@ pub fn patch<'a>(blocks: &mut [Block<'a>]) -> Result<HashMap<&'a str, u16>, Vec<
             }
         }
     }
-    
     
     if errors.is_empty() {
         Ok(addresses)
@@ -309,8 +409,8 @@ pub fn write_object_code(blocks: &[Block], labels: &HashMap<&str, u16>) -> Vec<u
     const CODE_HEADER   : u16 = 0xCADE;
     const DATA_HEADER   : u16 = 0xDADA;
     const SYMBOL_HEADER : u16 = 0xC3B7;
-    const FILE_HEADER   : u16 = 0xF17E;
-    const LINE_HEADER   : u16 = 0x715E;
+    // const FILE_HEADER   : u16 = 0xF17E;
+    // const LINE_HEADER   : u16 = 0x715E;
     
     fn write_be(bytes: &mut Vec<u8>, short: u16) {
         bytes.push(((short & 0xff00) >> 8) as u8);
@@ -342,6 +442,8 @@ pub fn write_object_code(blocks: &[Block], labels: &HashMap<&str, u16>) -> Vec<u
             },
             BlockType::Data(data) => {
                 if data.is_empty() { continue; }
+                
+                println!("Writing data address {:x} labeled {:?}", address, &block.labels);
 
                 let mut size = 0;
                 for datum in data {
