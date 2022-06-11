@@ -15,6 +15,8 @@ use std::collections::HashMap;
 struct Args {
     #[clap(default_value = "output.obj", long, short)]
     output_path: PathBuf,
+    #[clap(long, short = 'g')]
+    debug_info: bool,
     input_paths: Vec<PathBuf>,
 }
 
@@ -37,13 +39,26 @@ fn main() {
     }
 
     for i in 0..args.input_paths.len() {
-        match cereal::parse_string(&args.input_paths[i], &file_strings[i], &mut blocks, &mut constants) {
-            Ok(()) => (),
-            Err(()) => return,
+        let path = &args.input_paths[i];
+        let extension = if let Some(e) = path.extension() {
+            e
+        } else {
+            println!("Cannot read file path extension for file '{:?}'", path);
+            return;
+        };
+
+        if extension == "asm" {
+            match cereal::assemble(path, &file_strings[i], &mut blocks, &mut constants) {
+                Ok(()) => (),
+                Err(()) => return,
+            }
+        } else {
+            println!("ERROR: Only accepting .asm files as inputs. Cannot compile '{:?}'", path);
+            return;
         }
     }
     
-    let bytes = match cereal::compile_and_link(&mut blocks, &constants) {
+    let bytes = match cereal::compile_and_link(&mut blocks, &constants, args.debug_info) {
         Ok(bytes) => bytes,
         Err(())=> return,
     };

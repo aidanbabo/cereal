@@ -1,13 +1,6 @@
 use std::borrow::Cow;
 
-use crate::InstructionType;
-
-#[derive(Clone, Copy, Debug)]
-pub struct Span {
-    pub start: usize,
-    pub end: usize,
-    pub line: usize,
-}
+use crate::{InstructionType, Span};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DirectiveType {
