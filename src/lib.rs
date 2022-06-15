@@ -1,16 +1,74 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::Path;
+use std::marker::PhantomData;
 
 pub mod printer;
 pub mod assembler;
+pub mod ir;
+pub mod c;
+pub mod char_utils;
 
 #[derive(Clone, Copy, Debug)]
-pub struct Span {
+pub struct Span<'source> {
     pub start: usize,
     pub end: usize,
     pub line: usize,
+    _phantom: PhantomData<&'source ()>,
 }
+
+impl<'source> Span<'source> {
+    pub fn new(_s: &'source str, start: usize, end: usize, line: usize) -> Self {
+        Span {
+            start,
+            end,
+            line,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Spanned<'source, T> {
+    t: T,
+    pub span: Span<'source>,
+}
+
+impl<'source, T> Spanned<'source, T> {
+    pub fn new(t: T, span: Span<'source>) -> Self {
+        Spanned {
+            t,
+            span,
+        }
+    }
+}
+
+trait Spannable<'source> {
+    fn spanned(self, span: Span<'source>) -> Spanned<'source, Self> where Self: Sized;
+}
+
+impl<'source, T> Spannable<'source> for T {
+    fn spanned(self, span: Span<'source>) -> Spanned<'source, T> {
+        Spanned::new(self, span)
+    }
+}
+
+use std::ops;
+impl<'source, T> ops::Deref for Spanned<'source, T> {
+    type Target = T;
+    
+    fn deref(&self) -> &Self::Target {
+        &self.t
+    }
+}
+
+impl<'source, T> ops::DerefMut for Spanned<'source, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.t
+    }
+}
+
+pub type S<'source, T> = Spanned<'source, T>;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Reg {
@@ -245,6 +303,15 @@ pub fn assemble<'container, 'source>(
     constants: &'container mut HashMap<&'source str, i32>
 ) -> Result<(), ()> {
     assembler::parse_string(filename, string, blocks, constants)
+}
+
+pub fn compile_c<'container, 'source>(
+    filename: &Path, 
+    string: &'source str, 
+    blocks: &'container mut Vec<Block<'source>>, 
+    constants: &'container mut HashMap<&'source str, i32>
+) -> Result<(), ()> {
+    c::compile(filename, string, blocks, constants)
 }
 
 pub fn compile_and_link(blocks: &mut [Block], constants: &HashMap<&str, i32>, debug_info: bool) -> Result<Vec<u8>, ()> {
@@ -642,3 +709,75 @@ fn instruction_operands(instruction_type: InstructionType, ops: &mut [Operand]) 
     }
     &ops[..specs.len()]
 }
+
+mod insn {
+    use super::*;
+    use InstructionType::*;
+
+    pub fn addi(rd: i8, rs: i8, immediate: i32) -> InstructionWithLabel<'static> {
+        InstructionWithLabel {
+            ty: Add,
+            rd,
+            rs,
+            rt: -1,
+            immediate,
+            label: None,
+        }
+    }
+
+    pub fn ldr(value: i8, addr: i8, offset: i32) -> InstructionWithLabel<'static> {
+        InstructionWithLabel {
+            ty: Ldr,
+            rd: value,
+            rs: addr,
+            rt: -1,
+            immediate: offset,
+            label: None,
+        }
+    }
+
+    pub fn str(value: i8, addr: i8, offset: i32) -> InstructionWithLabel<'static> {
+        InstructionWithLabel {
+            ty: Str,
+            rd: -1,
+            rs: addr,
+            rt: value,
+            immediate: offset,
+            label: None,
+        }
+    }
+
+    pub fn konst(dest: i8, value: i32) -> InstructionWithLabel<'static> {
+        InstructionWithLabel {
+            ty: Const,
+            rd: dest,
+            rs: -1,
+            rt: -1,
+            immediate: value,
+            label: None,
+        }
+    }
+
+    pub fn hiconst(dest: i8, value: i32) -> InstructionWithLabel<'static> {
+        InstructionWithLabel {
+            ty: Hiconst,
+            rd: dest,
+            rs: -1,
+            rt: -1,
+            immediate: value,
+            label: None,
+        }
+    }
+
+    pub fn jmpr(dest: i8) -> InstructionWithLabel<'static> {
+        InstructionWithLabel {
+            ty: Jmpr,
+            rd: -1,
+            rs: dest,
+            rt: -1,
+            immediate: -1,
+            label: None,
+        }
+    }
+}
+

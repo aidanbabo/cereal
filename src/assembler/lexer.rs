@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
 use crate::{InstructionType, Span};
+use crate::char_utils::CharIter;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DirectiveType {
@@ -53,59 +54,9 @@ pub enum TokenType<'a> {
 
 #[derive(Clone, Debug)]
 pub struct Token<'a> {
-    pub span: Span,
+    pub span: Span<'a>,
     pub chars: &'a str,
     pub ty: TokenType<'a>,
-}
-
-struct CharIter<'a> {
-    iter: std::str::CharIndices<'a>,
-    peek_pair: Option<(usize, char)>,
-    input: &'a str,
-}
-
-impl<'a> CharIter<'a> {
-    fn new(input: &'a str) -> Self {
-        CharIter {
-            iter: input.char_indices(),
-            peek_pair: None,
-            input,
-        }
-    }
-    
-    fn fill_peek(&mut self) {
-        if self.peek_pair.is_none() {
-            if let Some(p) = self.iter.next() {
-                self.peek_pair = Some(p);
-            }
-        }
-    }
-    
-    fn peek(&mut self) -> Option<char> {
-        self.fill_peek();
-        Some(self.peek_pair?.1)
-    }
-    
-    fn peek_position(&mut self) -> usize {
-        self.fill_peek();
-        match self.peek_pair {
-            Some((p, _)) => p,
-            None => self.input.len(),
-        }
-    }
-    
-    fn consume(&mut self) -> Option<char> {
-        match self.peek_pair {
-            Some((_, c)) => {
-                self.peek_pair = None;
-                Some(c)
-            }
-            None => match self.iter.next() {
-                Some((_, c)) => Some(c),
-                None => None,
-            }
-        }
-    }
 }
 
 fn is_decimal(c: char) -> bool {
@@ -216,12 +167,13 @@ impl<'a> Lexer<'a> {
         }
     }
     
-    fn span(&mut self) -> (Span, &'a str) {
-        let span = Span {
-            start: self.token_start,
-            end: self.char_iter.peek_position(),
-            line: self.line,
-        };
+    fn span(&mut self) -> (Span<'a>, &'a str) {
+        let span = Span::new(
+            self.input,
+            self.token_start,
+            self.char_iter.peek_position(),
+            self.line,
+        );
         (span, &self.input[span.start..span.end])
     }
     

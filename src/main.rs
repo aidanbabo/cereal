@@ -52,8 +52,13 @@ fn main() {
                 Ok(()) => (),
                 Err(()) => return,
             }
+        } else if extension == "c" {
+            match cereal::compile_c(path, &file_strings[i], &mut blocks, &mut constants) {
+                Ok(()) => (),
+                Err(()) => return,
+            }
         } else {
-            println!("ERROR: Only accepting .asm files as inputs. Cannot compile '{:?}'", path);
+            println!("ERROR: Only accepting .asm and .c files as inputs. Cannot compile '{:?}'", path);
             return;
         }
     }
