@@ -1,8 +1,4 @@
 // @Todo error handling, use span information
-// @Todo code/data in the wrong section of memory
-// @Todo when code/data is written on top of each other, issue an error (unless the actual program allows this)
-//     - we were permitted to just override the old values when we had to write the loader for class, but i suspect a 
-//       good assembler would warn you about this
 // @Todo indicate error in process return value
 // @Todo debug info: .loc and filename indices
 

@@ -16,12 +16,10 @@ pub fn compile<'container, 'source>(
     blocks: &'container mut Vec<Block<'source>>, 
     constants: &'container mut HashMap<&'source str, i32>
 ) -> Result<(), ()> {
-    let lexer = Lexer::new(string);
-    
-    
+
     let mut tokens = Vec::new();
     let mut errors = Vec::new();
-    for token in lexer {
+    for token in Lexer::new(string) {
         match token {
             Ok(token) => if errors.is_empty() { tokens.push(token); },
             Err(error) => errors.push(error),
@@ -47,6 +45,7 @@ pub fn compile<'container, 'source>(
         Err(error) => {
             println!("Errors in file {:?}", filename);
             println!("{}", error);
+            return Err(());
         }
     }
     

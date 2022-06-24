@@ -401,11 +401,20 @@ fn expand_psuedo_instructions(blocks: &mut [Block], constants: &HashMap<&str, i3
 }
 
 fn patch<'a>(blocks: &mut [Block<'a>]) -> Result<HashMap<&'a str, u16>, Vec<String>> {
+    
+    struct Region<'s> {
+        label: &'s str,
+        start: u16,
+        end: u16,
+    }
 
     let mut addresses = HashMap::new();
-    let mut errors = vec![];
+    let mut errors = Vec::new();
     let mut code_addr = 0;
     let mut data_addr = 0x2000;
+    
+    // we could probably make this n*log(n) instead of n^2
+    let mut regions = Vec::new();
     
     for block in &mut* blocks {
         let size = block.size();
@@ -427,10 +436,45 @@ fn patch<'a>(blocks: &mut [Block<'a>]) -> Result<HashMap<&'a str, u16>, Vec<Stri
         
         for label in &block.labels {
             if let Some(old_addr) = addresses.insert(*label, *addr) {
-                errors.push(format!("Label '{}' is already defined at address {:x}", label, old_addr));
+                errors.push(format!("Label '{}' is already defined at address {:x}.", label, old_addr));
             }
         }
-        *addr += size;
+        
+        let end = *addr + size;
+        let label = block.labels.get(0).unwrap_or(&"Unlabeled");
+        let region = Region {
+            label, 
+            start: *addr, 
+            end,
+        };
+        
+        for &Region{ label, start, end } in &regions {
+            if region.end <= start || end <= region.start {
+                continue;
+            }
+            errors.push(format!("Overlapping blocks: Block {} is {:x}-{:x} and block {} is {:x}-{:x}.", label, start, end, region.label, region.start, region.end));
+        }
+        
+        match &block.ty {
+            BlockType::Code(_) => {
+                let in_user = region.end <= 0x2000;
+                let in_os = region.start >= 0x8000 && region.end <= 0xA000;
+                if !(in_user || in_os) {
+                    errors.push(format!("Code block labeled {} is not in the correct section of memory. Range {:x}-{:x}.", region.label, region.start, region.end));
+                }
+            }
+            BlockType::Data(_) => {
+                let in_user = region.start >= 0x2000 && region.end <= 0x8000;
+                let in_os = region.start >= 0xA000;
+                if !(in_user || in_os) {
+                    errors.push(format!("Data block labeled {} is not in the correct section of memory. Range {:x}-{:x}.", region.label, region.start, region.end));
+                }
+            }
+        }
+        
+        regions.push(region);
+
+        *addr = end;
     }
     
     if !errors.is_empty() {
