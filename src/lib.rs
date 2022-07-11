@@ -8,7 +8,15 @@ pub mod assembler;
 pub mod ir;
 pub mod c;
 pub mod char_utils;
+pub mod tools;
 
+const CODE_HEADER   : u16 = 0xCADE;
+const DATA_HEADER   : u16 = 0xDADA;
+const SYMBOL_HEADER : u16 = 0xC3B7;
+const FILE_HEADER   : u16 = 0xF17E;
+const LINE_HEADER   : u16 = 0x715E;
+
+    
 #[derive(Clone, Copy, Debug)]
 pub struct Span<'source> {
     pub start: usize,
@@ -532,12 +540,6 @@ fn patch<'a>(blocks: &mut [Block<'a>]) -> Result<HashMap<&'a str, u16>, Vec<Stri
 }
 
 fn write_object_code(blocks: &[Block], labels: &HashMap<&str, u16>, debug_info: bool) -> Vec<u8> {
-    const CODE_HEADER   : u16 = 0xCADE;
-    const DATA_HEADER   : u16 = 0xDADA;
-    const SYMBOL_HEADER : u16 = 0xC3B7;
-    // const FILE_HEADER   : u16 = 0xF17E;
-    // const LINE_HEADER   : u16 = 0x715E;
-    
     fn write_be(bytes: &mut Vec<u8>, short: u16) {
         bytes.push(((short & 0xff00) >> 8) as u8);
         bytes.push((short & 0xff) as u8);
@@ -549,6 +551,15 @@ fn write_object_code(blocks: &[Block], labels: &HashMap<&str, u16>, debug_info: 
     }
 
     let mut bytes = Vec::new();
+    
+    if debug_info {
+        for (label, address) in labels {
+            write_be(&mut bytes, SYMBOL_HEADER);
+            write_be(&mut bytes, *address);
+            write_be(&mut bytes, label.len() as u16);
+            bytes.extend_from_slice(label.as_bytes());
+        }
+    }
     
     for block in blocks {
         let address = block.addr.unwrap();
@@ -593,15 +604,6 @@ fn write_object_code(blocks: &[Block], labels: &HashMap<&str, u16>, debug_info: 
                     }
                 }
             },
-        }
-    }
-    
-    if debug_info {
-        for (label, address) in labels {
-            write_be(&mut bytes, SYMBOL_HEADER);
-            write_be(&mut bytes, *address);
-            write_be(&mut bytes, label.len() as u16);
-            bytes.extend_from_slice(label.as_bytes());
         }
     }
     

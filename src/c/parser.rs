@@ -40,7 +40,7 @@ pub struct Statement<'s> {
 
 #[derive(Debug)]
 pub struct Procedure<'s> {
-    pub _args: Vec<S<'s, (Type, &'s str)>>,
+    pub args: Vec<S<'s, (Type, &'s str)>>,
     pub name: S<'s, &'s str>,
     pub return_type: Option<S<'s, Type>>,
     pub body: Vec<Statement<'s>>,
@@ -77,7 +77,7 @@ impl<'s> Parser<'s> {
     }
     
     fn consume(&mut self) -> Option<S<'s, Token<'s>>> {
-        let token = self.tokens.get(self.next_token).cloned();
+        let token = self.tokens.get(self.next_token).copied();
         self.next_token += 1;
         token
     }
@@ -178,7 +178,7 @@ impl<'s> Parser<'s> {
         };
         
         Ok(Procedure {
-            _args: Vec::new(),
+            args: Vec::new(),
             name: name.chars.spanned(name.span),
             return_type: Some(return_type.spanned(ty.span)),
             body: stmts,

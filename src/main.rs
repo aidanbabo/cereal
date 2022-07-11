@@ -18,6 +18,10 @@ struct Args {
 
 fn main() {
     let args = <Args as clap::Parser>::parse();
+    
+    if args.input_paths.is_empty() {
+        return;
+    }
 
     let mut blocks = Vec::new();
     let mut constants = HashMap::new();
