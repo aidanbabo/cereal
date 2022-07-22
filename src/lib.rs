@@ -8,7 +8,7 @@ pub mod assembler;
 pub mod ir;
 pub mod c;
 pub mod char_utils;
-pub mod tools;
+pub mod simulator;
 
 const CODE_HEADER   : u16 = 0xCADE;
 const DATA_HEADER   : u16 = 0xDADA;
