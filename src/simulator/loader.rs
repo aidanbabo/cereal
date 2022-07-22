@@ -2,12 +2,15 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 
 use super::Machine;
-use super::decode::decode;
+use super::decode::{decode, InvalidInstructionError};
 
 // @Todo complete
 fn print_instruction(word: u16, trace: &mut dyn Write) -> io::Result<()> {
-    let instruction = decode(word);
-    writeln!(trace, "\t{}", instruction.ty.to_mnemonic())?;
+    let instruction = decode(word, None);
+    match instruction {
+        Ok(instruction) => writeln!(trace, "\t{}", instruction.ty.to_mnemonic())?,
+        Err(InvalidInstructionError) => writeln!(trace, "\tInvalid Instruction")?,
+    }
     Ok(())
 }
 
@@ -46,7 +49,7 @@ pub fn load(bytes: &[u8], machine: &mut Machine, mut trace: Option<&mut dyn Writ
                 let addr = read_word(bytes);
                 let ninstructions = read_word(bytes);
 
-                if let Some(trace) = &mut trace {
+                if let Some(trace) = trace.as_deref_mut() {
                     writeln!(trace, ".code")?;
                     writeln!(trace, ".addr {:x}", addr)?;
 
@@ -67,7 +70,7 @@ pub fn load(bytes: &[u8], machine: &mut Machine, mut trace: Option<&mut dyn Writ
                 let addr = read_word(bytes);
                 let nwords = read_word(bytes);
                 
-                if let Some(trace) = &mut trace {
+                if let Some(trace) = trace.as_deref_mut() {
                     writeln!(trace, ".data")?;
                     writeln!(trace, ".addr {:x}", addr)?;
                 
@@ -97,7 +100,7 @@ pub fn load(bytes: &[u8], machine: &mut Machine, mut trace: Option<&mut dyn Writ
                 let nbytes = read_word(bytes);
                 let file_name = read_str(bytes, nbytes);
                 file_names.push(file_name);
-                if let Some(trace) = &mut trace {
+                if let Some(trace) = trace.as_deref_mut() {
                     writeln!(trace, "; File index ({}) file: {}", file_names.len() - 1, file_name)?;
                 }
             } 
@@ -105,12 +108,12 @@ pub fn load(bytes: &[u8], machine: &mut Machine, mut trace: Option<&mut dyn Writ
                 let addr = read_word(bytes);
                 let line = read_word(bytes);
                 let file_index = read_word(bytes);
-                if let Some(trace) = &mut trace {
+                if let Some(trace) = trace.as_deref_mut() {
                     writeln!(trace, "; Line number at address: {:x} for line {} in file index {}", addr, line, file_index)?;
                 }
             }
             _ => {
-                if let Some(trace) = &mut trace {
+                if let Some(trace) = trace.as_deref_mut() {
                     writeln!(trace, "; GUH ?!?!?! WHAT THE HELL ?!?!?")?;
                 }
             }

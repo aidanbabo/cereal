@@ -1,4 +1,4 @@
-use super::{InstructionType, Instruction};
+use super::{InstructionType, Instruction, Trace, write_enable_consts::*};
 
 fn sext(word: u16, bit: u8) -> i16 {
     let bit = 1 << (bit - 1);
@@ -12,7 +12,7 @@ fn sext(word: u16, bit: u8) -> i16 {
     }
 }
 
-fn branch(word: u16) -> Instruction {
+fn branch(word: u16, _: Option<&mut Trace>) -> Instruction {
     let op = (word & 0x0e00) >> 9;
     let immediate = sext(word & 0x01ff, 9);
     let ty = match op {
@@ -35,7 +35,7 @@ fn branch(word: u16) -> Instruction {
     }
 }
 
-fn arithmetic(word: u16) -> Instruction {
+fn arithmetic(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
     let op = (word & 0x0038) >> 3;
     let rd = ((word & 0x0e00) >> 9) as u8;
     let rs = ((word & 0x01c0) >> 6) as u8;
@@ -57,6 +57,12 @@ fn arithmetic(word: u16) -> Instruction {
     };
     
     let rt = (word & 0x0007) as u8;
+
+    if let Some(trace) = trace.as_deref_mut() {
+        trace.write_enable_flags = NZP_WRITE_ENABLE | REGISTER_FILE_WRITE_ENABLE;
+        trace.register_write_register = rd;
+    }
+    
     Instruction {
         ty,
         rd,
@@ -66,10 +72,15 @@ fn arithmetic(word: u16) -> Instruction {
     }
 }
 
-fn cmp(word: u16) -> Instruction {
+fn cmp(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
     let op = (word & 0x0180) >> 7;
     let rd = ((word & 0x0e00) >> 9) as u8;
     let rs = ((word & 0x01c0) >> 6) as u8;
+
+    if let Some(trace) = trace.as_deref_mut() {
+        trace.write_enable_flags = NZP_WRITE_ENABLE;
+    }
+    
     match op {
         0b00 => {
             let rt = (word & 0x0007) as u8;
@@ -115,7 +126,13 @@ fn cmp(word: u16) -> Instruction {
     }
 }
 
-fn subroutine(word: u16) -> Instruction {
+fn subroutine(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
+
+    if let Some(trace) = trace.as_deref_mut() {
+        trace.write_enable_flags = NZP_WRITE_ENABLE | REGISTER_FILE_WRITE_ENABLE;
+        trace.register_write_register = 7;
+    }
+    
     if (word & 0x0800) == 0 {
         let rt = ((word & 0x01c0) >> 6) as u8;
         Instruction {
@@ -137,7 +154,7 @@ fn subroutine(word: u16) -> Instruction {
     }
 }
 
-fn logical(word: u16) -> Instruction {
+fn logical(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
     let op = (word & 0x0038) >> 3;
     let rd = ((word & 0x0e00) >> 9) as u8;
     let rs = ((word & 0x01c0) >> 6) as u8;
@@ -160,6 +177,12 @@ fn logical(word: u16) -> Instruction {
     
     // @Todo should we zero out rt for NOT ?
     let rt = (word & 0x0007) as u8;
+
+    if let Some(trace) = trace.as_deref_mut() {
+        trace.write_enable_flags = NZP_WRITE_ENABLE | REGISTER_FILE_WRITE_ENABLE;
+        trace.register_write_register = rd;
+    }
+    
     Instruction {
         ty,
         rd,
@@ -169,10 +192,16 @@ fn logical(word: u16) -> Instruction {
     }
 }
 
-fn load(word: u16) -> Instruction {
+fn load(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
     let rd = ((word & 0x0e00) >> 9) as u8;
     let rs = ((word & 0x01c0) >> 6) as u8;
     let immediate = sext(word & 0x003f, 6);
+
+    if let Some(trace) = trace.as_deref_mut() {
+        trace.write_enable_flags = NZP_WRITE_ENABLE | REGISTER_FILE_WRITE_ENABLE;
+        trace.register_write_register = rd;
+    }
+    
     Instruction {
         ty: InstructionType::Ldr,
         rd,
@@ -182,20 +211,25 @@ fn load(word: u16) -> Instruction {
     }
 }
 
-fn store(word: u16) -> Instruction {
-    let rd = ((word & 0x0e00) >> 9) as u8;
-    let rt = ((word & 0x01c0) >> 6) as u8;
+fn store(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
+    let rt = ((word & 0x0e00) >> 9) as u8;
+    let rs = ((word & 0x01c0) >> 6) as u8;
     let immediate = sext(word & 0x003f, 6);
+
+    if let Some(trace) = trace.as_deref_mut() {
+        trace.write_enable_flags = DATA_WRITE_ENABLE;
+    }
+    
     Instruction {
         ty: InstructionType::Str,
-        rd,
-        rs: 0,
+        rd: 0,
+        rs,
         rt,
         immediate,
     }
 }
 
-fn rti(_: u16) -> Instruction {
+fn rti(_: u16, _: Option<&mut Trace>) -> Instruction {
     Instruction {
         ty: InstructionType::Rti,
         rd: 0,
@@ -205,9 +239,15 @@ fn rti(_: u16) -> Instruction {
     }
 }
 
-fn konst(word: u16) -> Instruction {
+fn konst(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
     let rd = ((word & 0x0e00) >> 9) as u8;
     let immediate = sext(word & 0x01ff, 9);
+
+    if let Some(trace) = trace.as_deref_mut() {
+        trace.write_enable_flags = NZP_WRITE_ENABLE | REGISTER_FILE_WRITE_ENABLE;
+        trace.register_write_register = rd;
+    }
+    
     Instruction {
         ty: InstructionType::Const,
         rd,
@@ -217,10 +257,16 @@ fn konst(word: u16) -> Instruction {
     }
 }
 
-fn shift(word: u16) -> Instruction {
+fn shift(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
     let op = (word & 0x0030) >> 4;
     let rd = ((word & 0x0e00) >> 9) as u8;
     let rs = ((word & 0x01c0) >> 6) as u8;
+
+    if let Some(trace) = trace.as_deref_mut() {
+        trace.write_enable_flags = NZP_WRITE_ENABLE | REGISTER_FILE_WRITE_ENABLE;
+        trace.register_write_register = rd;
+    }
+    
     let ty = match op {
         0b00 => InstructionType::Sll,
         0b01 => InstructionType::Sra,
@@ -248,7 +294,7 @@ fn shift(word: u16) -> Instruction {
     }
 }
 
-fn jump(word: u16) -> Instruction {
+fn jump(word: u16, _: Option<&mut Trace>) -> Instruction {
     if (word & 0x0800) == 0 {
         let rt = ((word & 0x01c0) >> 6) as u8;
         Instruction {
@@ -270,9 +316,15 @@ fn jump(word: u16) -> Instruction {
     }
 }
 
-fn hiconst(word: u16) -> Instruction {
+fn hiconst(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
     let rd = ((word & 0x0e00) >> 9) as u8;
     let immediate = (word & 0x00ff) as i16;
+
+    if let Some(trace) = trace.as_deref_mut() {
+        trace.write_enable_flags = NZP_WRITE_ENABLE | REGISTER_FILE_WRITE_ENABLE;
+        trace.register_write_register = rd;
+    }
+    
     Instruction {
         ty: InstructionType::Hiconst,
         rd,
@@ -282,8 +334,14 @@ fn hiconst(word: u16) -> Instruction {
     }
 }
 
-fn trap(word: u16) -> Instruction {
+fn trap(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
     let immediate = (word & 0x00ff) as i16;
+
+    if let Some(trace) = trace.as_deref_mut() {
+        trace.write_enable_flags = NZP_WRITE_ENABLE | REGISTER_FILE_WRITE_ENABLE;
+        trace.register_write_register = 7;
+    }
+    
     Instruction {
         ty: InstructionType::Trap,
         rd: 0,
@@ -293,25 +351,29 @@ fn trap(word: u16) -> Instruction {
     }
 }
 
-pub(super) fn decode(word: u16) -> Instruction {
+#[derive( Copy, Clone, Debug)]
+pub(super) struct InvalidInstructionError;
+
+pub(super) fn decode(word: u16, trace: Option<&mut Trace>) -> Result<Instruction, InvalidInstructionError> {
     let op_code = word >> 12;
-    match op_code {
-        0x0 => branch(word),
-        0x1 => arithmetic(word),
-        0x2 => cmp(word),
-        0x3 => unreachable!(),
-        0x4 => subroutine(word),
-        0x5 => logical(word),
-        0x6 => load(word),
-        0x7 => store(word),
-        0x8 => rti(word),
-        0x9 => konst(word),
-        0xA => shift(word),
-        0xB => unreachable!(),
-        0xC => jump(word),
-        0xD => hiconst(word),
-        0xE => unreachable!(),
-        0xF => trap(word),
+    let instruction = match op_code {
+        0x0 => branch(word, trace),
+        0x1 => arithmetic(word, trace),
+        0x2 => cmp(word, trace),
+        0x3 => return Err(InvalidInstructionError),
+        0x4 => subroutine(word, trace),
+        0x5 => logical(word, trace),
+        0x6 => load(word, trace),
+        0x7 => store(word, trace),
+        0x8 => rti(word, trace),
+        0x9 => konst(word, trace),
+        0xA => shift(word, trace),
+        0xB => return Err(InvalidInstructionError),
+        0xC => jump(word, trace),
+        0xD => hiconst(word, trace),
+        0xE => return Err(InvalidInstructionError),
+        0xF => trap(word, trace),
         _ => unreachable!("Top-level op code"),
-    }
+    };
+    Ok(instruction)
 }
