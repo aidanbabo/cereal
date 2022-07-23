@@ -39,6 +39,12 @@ fn arithmetic(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
     let op = (word & 0x0038) >> 3;
     let rd = ((word & 0x0e00) >> 9) as u8;
     let rs = ((word & 0x01c0) >> 6) as u8;
+
+    if let Some(trace) = trace.as_deref_mut() {
+        trace.write_enable_flags = NZP_WRITE_ENABLE | REGISTER_FILE_WRITE_ENABLE;
+        trace.register_write_register = rd;
+    }
+    
     let ty = match op {
         0b000 => InstructionType::Add,
         0b001 => InstructionType::Mul,
@@ -58,11 +64,6 @@ fn arithmetic(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
     
     let rt = (word & 0x0007) as u8;
 
-    if let Some(trace) = trace.as_deref_mut() {
-        trace.write_enable_flags = NZP_WRITE_ENABLE | REGISTER_FILE_WRITE_ENABLE;
-        trace.register_write_register = rd;
-    }
-    
     Instruction {
         ty,
         rd,
@@ -74,8 +75,7 @@ fn arithmetic(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
 
 fn cmp(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
     let op = (word & 0x0180) >> 7;
-    let rd = ((word & 0x0e00) >> 9) as u8;
-    let rs = ((word & 0x01c0) >> 6) as u8;
+    let rs = ((word & 0x0e00) >> 9) as u8;
 
     if let Some(trace) = trace.as_deref_mut() {
         trace.write_enable_flags = NZP_WRITE_ENABLE;
@@ -86,7 +86,7 @@ fn cmp(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
             let rt = (word & 0x0007) as u8;
             Instruction {
                 ty: InstructionType::Cmp,
-                rd,
+                rd: 0,
                 rs,
                 rt,
                 immediate: 0,
@@ -96,7 +96,7 @@ fn cmp(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
             let rt = (word & 0x0007) as u8;
             Instruction {
                 ty: InstructionType::Cmpu,
-                rd,
+                rd: 0,
                 rs,
                 rt,
                 immediate: 0,
@@ -106,7 +106,7 @@ fn cmp(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
             let immediate = sext(word & 0x007f, 7);
             Instruction {
                 ty: InstructionType::Cmpi,
-                rd,
+                rd: 0,
                 rs,
                 rt: 0,
                 immediate,
@@ -116,7 +116,7 @@ fn cmp(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
             let immediate = (word & 0x007f) as i16;
             Instruction {
                 ty: InstructionType::Cmpiu,
-                rd,
+                rd: 0,
                 rs,
                 rt: 0,
                 immediate,
@@ -134,12 +134,12 @@ fn subroutine(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
     }
     
     if (word & 0x0800) == 0 {
-        let rt = ((word & 0x01c0) >> 6) as u8;
+        let rs = ((word & 0x01c0) >> 6) as u8;
         Instruction {
             ty: InstructionType::Jsrr,
             rd: 0,
-            rs: 0,
-            rt,
+            rs,
+            rt: 0,
             immediate: 0,
         }
     } else {
@@ -158,6 +158,12 @@ fn logical(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
     let op = (word & 0x0038) >> 3;
     let rd = ((word & 0x0e00) >> 9) as u8;
     let rs = ((word & 0x01c0) >> 6) as u8;
+
+    if let Some(trace) = trace.as_deref_mut() {
+        trace.write_enable_flags = NZP_WRITE_ENABLE | REGISTER_FILE_WRITE_ENABLE;
+        trace.register_write_register = rd;
+    }
+    
     let ty = match op {
         0b000 => InstructionType::And,
         0b001 => InstructionType::Not,
@@ -178,11 +184,6 @@ fn logical(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
     // @Todo should we zero out rt for NOT ?
     let rt = (word & 0x0007) as u8;
 
-    if let Some(trace) = trace.as_deref_mut() {
-        trace.write_enable_flags = NZP_WRITE_ENABLE | REGISTER_FILE_WRITE_ENABLE;
-        trace.register_write_register = rd;
-    }
-    
     Instruction {
         ty,
         rd,
@@ -296,12 +297,12 @@ fn shift(word: u16, mut trace: Option<&mut Trace>) -> Instruction {
 
 fn jump(word: u16, _: Option<&mut Trace>) -> Instruction {
     if (word & 0x0800) == 0 {
-        let rt = ((word & 0x01c0) >> 6) as u8;
+        let rs = ((word & 0x01c0) >> 6) as u8;
         Instruction {
             ty: InstructionType::Jmpr,
             rd: 0,
-            rs: 0,
-            rt,
+            rs,
+            rt: 0,
             immediate: 0,
         }
     } else {

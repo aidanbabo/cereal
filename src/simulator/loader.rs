@@ -18,7 +18,7 @@ fn print_instruction(word: u16, trace: &mut dyn Write) -> io::Result<()> {
 // @Todo failure to load do to malformed file, bad header, not enough bytes left in file, etc.
 // @Todo proper error handling on malformed utf-8 strings
 // @Todo proper bounds checking errors
-pub fn load(bytes: &[u8], machine: &mut Machine, mut trace: Option<&mut dyn Write>) -> io::Result<()> {
+pub(super) fn load(bytes: &[u8], machine: &mut Machine, mut trace: Option<&mut dyn Write>) -> io::Result<()> {
     use crate::{CODE_HEADER, DATA_HEADER, SYMBOL_HEADER, FILE_HEADER, LINE_HEADER};
     
     fn read_str<'a>(bytes: &mut &'a[u8], nbytes: u16) -> &'a str {

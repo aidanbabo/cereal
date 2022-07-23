@@ -1,6 +1,8 @@
 pub mod loader;
 pub mod decode;
 
+use std::io::{self, Write};
+
 #[derive(Copy, Clone)]
 #[repr(u8)]
 enum InstructionType {
@@ -99,21 +101,57 @@ mod write_enable_consts {
     pub const REGISTER_FILE_WRITE_ENABLE: u16 = 2;
     pub const DATA_WRITE_ENABLE: u16 = 4;
 }
+use write_enable_consts::*;
 
-pub struct Trace {
+struct Trace {
     current_pc: u16,
     current_instruction: u16,
     write_enable_flags: u16,
     register_write_value: u16,
     nzp_value: u16,
-    data_write_address: u16,
-    data_write_value: u16,
+    data_access_address: u16,
+    data_access_value: u16,
     register_write_register: u8,
+}
+
+impl Trace {
+    pub const fn new() -> Self {
+        Trace {
+            current_pc: 0,
+            current_instruction: 0,
+            write_enable_flags: 0,
+            register_write_value: 0,
+            nzp_value: 0,
+            data_access_address: 0,
+            data_access_value: 0,
+            register_write_register: 0,
+        }
+    }
+    
+    pub fn write_to_file(self, writer: &mut impl Write) -> io::Result<()> {
+        
+        let nzp_write_enable = (self.write_enable_flags & NZP_WRITE_ENABLE) >> 0;
+        let register_file_write_enable = (self.write_enable_flags & REGISTER_FILE_WRITE_ENABLE) >> 1;
+        let data_write_enable = (self.write_enable_flags & DATA_WRITE_ENABLE) >> 2;
+        
+        writeln!(writer, "{:04X} {:016b} {} {} {:04X} {} {} {} {:04X} {:04X}",
+            self.current_pc,
+            self.current_instruction,
+            register_file_write_enable,
+            self.register_write_register,
+            self.register_write_value,
+            nzp_write_enable,
+            self.nzp_value,
+            data_write_enable,
+            self.data_access_address,
+            self.data_access_value,
+        )
+    }
 }
 
 const MEMORY_SIZE: usize = 1 << 16;
 
-pub struct Machine {
+struct Machine {
     pc: u16,
     psr: u16,
     registers: [i16; 8],
@@ -137,6 +175,10 @@ impl Machine {
         }
     }
     
+    pub fn pc(&self) -> u16 {
+        self.pc
+    }
+    
     fn execute_instruction(&mut self, instruction: Instruction, trace: Option<&mut Trace>) -> Result<(), ()> {
         use core::ops::{BitAnd, Not, BitOr, BitXor};
         
@@ -145,7 +187,7 @@ impl Machine {
         const N: u16 = 4;
         const OS_MODE: u16 = 0x8000;
         
-        fn nzp(machine: &mut Machine, value: i16) {
+        fn nzp(machine: &mut Machine, mut trace: Option<&mut Trace>, value: i16) {
             use core::cmp::Ordering::*;
             let bits = match value.cmp(&0) {
                 Less => N,
@@ -153,6 +195,17 @@ impl Machine {
                 Greater => P,
             };
             machine.psr = (machine.psr & OS_MODE) | bits;
+            if let Some(trace) = trace.as_deref_mut() {
+                trace.nzp_value = bits;
+            }
+        }
+        
+        fn write_to_register(machine: &mut Machine, mut trace: Option<&mut Trace>, register: u8, value: i16) {
+            machine.registers[register as usize] = value;
+            nzp(machine, trace.as_deref_mut(), value);
+            if let Some(trace) = trace.as_deref_mut() {
+                trace.register_write_value = value as u16;
+            }
         }
         
         fn branch_on(machine: &Machine, bits: u16, immediate: i16) -> u16 {
@@ -168,29 +221,19 @@ impl Machine {
             let rs = machine.registers[instruction.rs as usize];
             let rt = machine.registers[instruction.rt as usize];
             let rd = f(rs, rt);
-            nzp(machine, rd);
-            machine.registers[instruction.rd as usize] = rd;
+            write_to_register(machine, trace.as_deref_mut(), instruction.rd, rd);
             machine.pc += 1;
-
-            if let Some(trace) = trace.as_deref_mut() {
-                trace.register_write_value = rd as u16;
-            }
         }
 
         fn binary_immediate<F: FnOnce(i16, i16) -> i16>(machine: &mut Machine, mut trace: Option<&mut Trace>, instruction: Instruction, f: F) {
             let rs = machine.registers[instruction.rs as usize];
             let immediate = instruction.immediate;
             let rd = f(rs, immediate);
-            nzp(machine, rd);
-            machine.registers[instruction.rd as usize] = rd;
+            write_to_register(machine, trace.as_deref_mut(), instruction.rd, rd);
             machine.pc += 1;
-
-            if let Some(trace) = trace.as_deref_mut() {
-                trace.register_write_value = rd as u16;
-            }
         }
         
-        fn cmp<T: Ord>(machine: &mut Machine, a: T, b: T) {
+        fn cmp<T: Ord>(machine: &mut Machine, mut trace: Option<&mut Trace>, a: T, b: T) {
             use core::cmp::Ordering::*;
             let bits = match a.cmp(&b) {
                 Less => N,
@@ -198,14 +241,24 @@ impl Machine {
                 Greater => P,
             };
             machine.psr = (machine.psr & OS_MODE) | bits;
+            if let Some(trace) = trace.as_deref_mut() {
+                trace.nzp_value = bits;
+            }
             machine.pc += 1;
         }
         
         // @Todo checks !
-        fn load(machine: &mut Machine, _: Option<&mut Trace>, instruction: Instruction) -> Result<(), ()> {
+        fn load(machine: &mut Machine, mut trace: Option<&mut Trace>, instruction: Instruction) -> Result<(), ()> {
             let address = (machine.registers[instruction.rs as usize] + instruction.immediate) as u16;
-            machine.registers[instruction.rd as usize] = machine.memory[address as usize] as i16;
+            let value = machine.memory[address as usize] as i16;
+            write_to_register(machine, trace.as_deref_mut(), instruction.rd, value);
             machine.pc += 1;
+
+            if let Some(trace) = trace.as_deref_mut() {
+                trace.data_access_address = address;
+                trace.data_access_value = value as u16;
+            }
+
             Ok(())
         }
 
@@ -217,8 +270,8 @@ impl Machine {
             machine.pc += 1;
 
             if let Some(trace) = trace.as_deref_mut() {
-                trace.data_write_address = address;
-                trace.data_write_value = value;
+                trace.data_access_address = address;
+                trace.data_access_value = value;
             }
 
             Ok(())
@@ -247,33 +300,35 @@ impl Machine {
             InstructionType::Ldr => load(self, trace, instruction)?,
             InstructionType::Str => store(self, trace, instruction)?,
             InstructionType::Const => {
-                self.registers[instruction.rd as usize] = instruction.immediate;
+                let value = instruction.immediate;
+                write_to_register(self, trace, instruction.rd, value);
                 self.pc += 1;
             },
             InstructionType::Hiconst => {
-                let rd = &mut self.registers[instruction.rd as usize];
-                *rd = (instruction.immediate << 8) | *rd & 0xff;
+                let rd = self.registers[instruction.rd as usize];
+                let value = (instruction.immediate << 8) | rd & 0xff;
+                write_to_register(self, trace, instruction.rd, value);
                 self.pc += 1;
             },
             InstructionType::Cmp => {
                 let rs = self.registers[instruction.rs as usize];
                 let rt = self.registers[instruction.rt as usize];
-                cmp(self, rs, rt);
+                cmp(self, trace, rs, rt);
             },
             InstructionType::Cmpu => {
                 let rs = self.registers[instruction.rs as usize] as u16;
                 let rt = self.registers[instruction.rt as usize] as u16;
-                cmp(self, rs, rt);
+                cmp(self, trace, rs, rt);
             },
             InstructionType::Cmpi => {
                 let rs = self.registers[instruction.rs as usize];
                 let immediate = instruction.immediate;
-                cmp(self, rs, immediate);
+                cmp(self, trace, rs, immediate);
             },
             InstructionType::Cmpiu => {
                 let rs = self.registers[instruction.rs as usize] as u16;
                 let immediate = instruction.immediate as u16;
-                cmp(self, rs, immediate);
+                cmp(self, trace, rs, immediate);
             },
             InstructionType::Sll => binary_immediate(self, trace, instruction, move |a, b| a << b),
             InstructionType::Sra => binary_immediate(self, trace, instruction, move |a, b| a >> b),
@@ -281,13 +336,13 @@ impl Machine {
             InstructionType::Jsrr => {
                 let rs = self.registers[instruction.rs as usize] as u16;
                 self.pc += 1;
-                self.registers[7] = self.pc as i16;
+                write_to_register(self, trace, 7, self.pc as i16);
                 self.pc = rs;
             },
             InstructionType::Jsr => {
                 let immediate = instruction.immediate as u16;
                 self.pc += 1;
-                self.registers[7] = self.pc as i16;
+                write_to_register(self, trace, 7, self.pc as i16);
                 self.pc = (self.pc & OS_MODE) | (immediate << 4);
             },
             InstructionType::Jmpr => {
@@ -300,12 +355,13 @@ impl Machine {
             },
             InstructionType::Trap => {
                 self.pc += 1;
-                self.registers[7] = self.pc as i16;
+                let value = self.pc as i16;
+                write_to_register(self, trace, 7, value);
                 self.pc = 0x8000 | instruction.immediate as u16;
                 self.psr |= OS_MODE;
             },
             InstructionType::Rti => {
-                self.pc += self.registers[7] as u16;
+                self.pc = self.registers[7] as u16;
                 self.psr &= !OS_MODE;
             },
         }
@@ -324,10 +380,58 @@ impl Machine {
         
         self.execute_instruction(instruction, trace.as_deref_mut()).expect("No execution errors.");
 
-        if let Some(trace) = trace.as_deref_mut() {
-            trace.nzp_value = self.psr & 0x0007;
-        }
-        
         Ok(())
+    }
+}
+
+use std::path::PathBuf;
+pub struct Options {
+    pub trace_path: Option<PathBuf>,
+    pub input_paths: Vec<PathBuf>,
+    pub step_cap: Option<u64>,
+}
+
+pub fn run(options: Options) {
+    let mut machine = Machine::new();
+    for path in &options.input_paths {
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                eprintln!("There was an error opening file {:?}: {}", path, e);
+                continue;
+            }
+        };
+        // loader::load(&bytes, &mut machine, Some(&mut std::io::stdout())).expect("Load failure");
+        loader::load(&bytes, &mut machine, None).expect("Load failure");
+    }
+    
+    let mut trace_file = options.trace_path.as_ref().map(|path| {
+        let file = std::fs::File::create(path).expect("Invalid file");
+        std::io::BufWriter::new(file)
+    });
+    
+    let mut steps = 0;
+    while machine.pc() != 0x80ff {
+        steps += 1;
+        match options.step_cap {
+            Some(cap) if steps > cap => break,     // @Todo error
+            _ => {},
+        }
+
+        let mut trace = if options.trace_path.is_some() {
+            Some(Trace::new())
+        } else {
+            None
+        };
+        match machine.step(trace.as_mut()) {
+            Ok(()) => {},
+            Err(()) => {
+                eprintln!("Error");
+                break;
+            }
+        }
+        if let Some(trace) = trace {
+            trace.write_to_file(trace_file.as_mut().unwrap()).expect("Failed to write to a file");
+        }
     }
 }

@@ -1,27 +1,21 @@
 use std::path::PathBuf;
 use clap::Parser;
 
-use cereal::simulator::{loader::load, Machine};
+use cereal::simulator::{run, Options};
 
 #[derive(Parser)]
 struct Args {
     input_paths: Vec<PathBuf>,
+    #[clap(long)]
+    trace_path: Option<PathBuf>,
 }
 
 fn main() {
-    println!("This is the simulator!");
-    
     let args = Args::parse();
-
-    let mut machine = Machine::new();
-    for path in &args.input_paths {
-        let bytes = match std::fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                eprintln!("There was an error opening file {:?}: {}", path, e);
-                continue;
-            }
-        };
-        let _ = load(&bytes, &mut machine, Some(&mut std::io::stdout()));
-    }
+    let options = Options {
+        input_paths: args.input_paths,
+        trace_path: args.trace_path,
+        step_cap: None,
+    };
+    run(options);
 }
