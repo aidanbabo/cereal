@@ -208,7 +208,7 @@ impl Machine {
             }
         }
         
-        fn branch_on(machine: &Machine, bits: u16, immediate: i16) -> u16 {
+        fn branch_on(machine: &Machine, immediate: i16, bits: u16) -> u16 {
             if machine.psr & bits > 0 {
                 (machine.pc as i32 + 1 + immediate as i32) as u16 
             } else {
@@ -216,8 +216,8 @@ impl Machine {
             }
         }
         
-        // @Compilation do these ruin compile times ?
-        fn binary<F: FnOnce(i16, i16) -> i16>(machine: &mut Machine, mut trace: Option<&mut Trace>, instruction: Instruction, f: F) {
+        // @Speed do these get inlines properly?
+        fn binary(machine: &mut Machine, mut trace: Option<&mut Trace>, instruction: Instruction, f: fn(i16, i16) -> i16) {
             let rs = machine.registers[instruction.rs as usize];
             let rt = machine.registers[instruction.rt as usize];
             let rd = f(rs, rt);
@@ -225,7 +225,8 @@ impl Machine {
             machine.pc += 1;
         }
 
-        fn binary_immediate<F: FnOnce(i16, i16) -> i16>(machine: &mut Machine, mut trace: Option<&mut Trace>, instruction: Instruction, f: F) {
+        // @Speed do these get inlines properly?
+        fn binary_immediate(machine: &mut Machine, mut trace: Option<&mut Trace>, instruction: Instruction, f: fn(i16, i16) -> i16) {
             let rs = machine.registers[instruction.rs as usize];
             let immediate = instruction.immediate;
             let rd = f(rs, immediate);
@@ -278,14 +279,14 @@ impl Machine {
         }
 
         match instruction.ty {
-            InstructionType::Nop => self.pc = branch_on(self, 0, instruction.immediate),
-            InstructionType::Brp => self.pc = branch_on(self, P, instruction.immediate),
-            InstructionType::Brz => self.pc = branch_on(self, Z, instruction.immediate),
-            InstructionType::Brzp => self.pc = branch_on(self, Z | P, instruction.immediate),
-            InstructionType::Brn => self.pc = branch_on(self, N, instruction.immediate),
-            InstructionType::Brnp => self.pc = branch_on(self, N | P, instruction.immediate),
-            InstructionType::Brnz => self.pc = branch_on(self, N | Z, instruction.immediate),
-            InstructionType::Brnzp => self.pc = branch_on(self, N | Z | P, instruction.immediate),
+            InstructionType::Nop   => self.pc = branch_on(self, instruction.immediate, 0),
+            InstructionType::Brp   => self.pc = branch_on(self, instruction.immediate, P),
+            InstructionType::Brz   => self.pc = branch_on(self, instruction.immediate, Z),
+            InstructionType::Brzp  => self.pc = branch_on(self, instruction.immediate, Z | P),
+            InstructionType::Brn   => self.pc = branch_on(self, instruction.immediate, N),
+            InstructionType::Brnp  => self.pc = branch_on(self, instruction.immediate, N | P),
+            InstructionType::Brnz  => self.pc = branch_on(self, instruction.immediate, N | Z),
+            InstructionType::Brnzp => self.pc = branch_on(self, instruction.immediate, N | Z | P),
             InstructionType::Add => binary(self, trace, instruction, i16::wrapping_add),
             InstructionType::Mul => binary(self, trace, instruction, i16::wrapping_mul),
             InstructionType::Sub => binary(self, trace, instruction, i16::wrapping_sub),
@@ -294,7 +295,7 @@ impl Machine {
             InstructionType::Mod => binary(self, trace, instruction, move |a, b| i16::checked_rem(a, b).unwrap_or(0)),
             InstructionType::And => binary(self, trace, instruction, i16::bitand),
             InstructionType::Not => binary(self, trace, instruction, move |a, _| i16::not(a)),
-            InstructionType::Or => binary(self, trace, instruction, i16::bitor),
+            InstructionType::Or  => binary(self, trace, instruction, i16::bitor),
             InstructionType::Xor => binary(self, trace, instruction, i16::bitxor),
             InstructionType::Andi => binary_immediate(self, trace, instruction, i16::bitand),
             InstructionType::Ldr => load(self, trace, instruction)?,
