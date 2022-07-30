@@ -2,12 +2,12 @@ use crate::{Span, S, Spannable};
 use crate::char_utils::CharIter;
 use crate::c::Error;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Literal {
     Numeric(i32),
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TokenType {
     // Fat types
     Literal(Literal),

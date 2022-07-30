@@ -83,7 +83,17 @@ impl<'s> Parser<'s> {
     }
     
     fn next_token_expected(&mut self, expected: &str) -> Result<S<'s, Token<'s>>, Error> {
-         self.consume().ok_or_else(|| format!("Expected {}, found end of file.", expected))
+        self.consume().ok_or_else(|| format!("Expected {}, found end of file.", expected))
+    }
+    
+    fn next_token_expected_of_type(&mut self, expected: &str, ty: TokenType) -> Result<S<'s, Token<'s>>, Error> {
+        self.next_token_expected(expected).and_then(|token| {
+            if ty == token.ty {
+                Ok(token)
+            } else {
+                Err(format!("Expected {}, found '{}'", expected, token.chars))
+            }
+        })
     }
     
     /*
@@ -146,18 +156,8 @@ impl<'s> Parser<'s> {
     }
     
     fn procedure(&mut self, ty: S<'s, Token<'s>>, name: S<'s, Token<'s>>, _left_paren: S<'s, Token<'s>>) -> Result<Procedure<'s>, Error> {
-        let right_paren = self.next_token_expected("')'")?;
-        if let TokenType::RightParen = right_paren.ty {
-        } else {
-            return Err(format!("Expected ')', found '{}'", right_paren.chars));
-        }
-        
-        // @Todo duplication
-        let left_brace = self.next_token_expected("'{'")?;
-        if let TokenType::LeftBrace = left_brace.ty {
-        } else {
-            return Err(format!("Expected '{{', found '{}'", left_brace.chars));
-        }
+        self.next_token_expected_of_type("')'", TokenType::RightParen)?;
+        self.next_token_expected_of_type("'{'", TokenType::LeftBrace)?;
         
         let mut stmts = Vec::new();
         while let Some(stmt) = self.statement() {
@@ -165,12 +165,7 @@ impl<'s> Parser<'s> {
             stmts.push(stmt);
         }
 
-        // @Todo duplication
-        let right_brace = self.next_token_expected("'}'")?;
-        if let TokenType::RightBrace = right_brace.ty {
-        } else {
-            return Err(format!("Expected '}}', found '{}'", right_brace.chars));
-        }
+        self.next_token_expected_of_type("'}'", TokenType::RightBrace)?;
         
         let return_type = match ty.ty {
             TokenType::Int => Type::Int,
@@ -186,15 +181,8 @@ impl<'s> Parser<'s> {
     }
     
     fn top_level_decl(&mut self, ty: S<'s, Token<'s>>) -> Result<TopLevel<'s>, Error> {
-        let second = self.next_token_expected("an identifier")?;
-
-        let identifier = if let TokenType::Identifier = second.ty {
-            second
-        } else {
-            return Err(format!("Expected identifier, found '{}'", second.chars));
-        };
-        
-        let third = self.next_token_expected("'('")?;
+        let identifier = self.next_token_expected_of_type("an identifier", TokenType::Identifier)?;
+        let third = self.next_token_expected_of_type("'('", TokenType::LeftParen)?;
         
         let top_level_ty = match third.ty {
             TokenType::LeftParen => TopLevelType::Procedure(self.procedure(ty, identifier, third)?),
@@ -206,15 +194,15 @@ impl<'s> Parser<'s> {
     
     fn top_level(&mut self) -> Option<Result<TopLevel<'s>, Error>> {
         let first = self.consume()?;
-        match first.ty {
-            TokenType::Int => return Some(self.top_level_decl(first)),
-            _ => return Some(Err(format!("Expected 'int', found '{}'", first.chars))),
-        }
+        let res = match first.ty {
+            TokenType::Int => self.top_level_decl(first),
+            _ => Err(format!("Expected 'int', found '{}'", first.chars)),
+        };
+        Some(res)
     }
 
     pub fn fill(&mut self, top_levels: &mut Vec<TopLevel<'s>>) -> Result<(), Error> {
-        while let Some(top_level) = self.top_level() {
-            let top_level = top_level?;
+        while let Some(top_level) = self.top_level().transpose()? {
             top_levels.push(top_level);
         }
         Ok(())

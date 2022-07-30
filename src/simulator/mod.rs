@@ -149,6 +149,32 @@ impl Trace {
     }
 }
 
+#[allow(dead_code)]
+#[derive(Debug)]
+struct ExecutionError {
+    kind: ExecutionErrorKind,
+    pc: u16,
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+enum ExecutionErrorKind {
+    PcRollover,
+    InvalidJump {
+        address: u16,
+    },
+    InvalidMemoryAccess {
+        address: u16,
+        lacks_privilege: bool,
+        is_read: bool,
+    },
+    InvalidInstruction,
+}
+
+const P: u16 = 1;
+const Z: u16 = 2;
+const N: u16 = 4;
+const OS_MODE: u16 = 0x8000;
 const MEMORY_SIZE: usize = 1 << 16;
 
 struct Machine {
@@ -169,7 +195,7 @@ impl Machine {
         };
         Machine {
             pc: 0x8200,
-            psr: 0x8002,
+            psr: OS_MODE | N,
             registers: [0; 8],
             memory,
         }
@@ -179,13 +205,12 @@ impl Machine {
         self.pc
     }
     
-    fn execute_instruction(&mut self, instruction: Instruction, trace: Option<&mut Trace>) -> Result<(), ()> {
+    fn os_mode(&self) -> bool {
+        self.psr | OS_MODE > 0
+    }
+    
+    fn execute_instruction(&mut self, instruction: Instruction, trace: Option<&mut Trace>) -> Result<(), ExecutionError> {
         use core::ops::{BitAnd, Not, BitOr, BitXor};
-        
-        const P: u16 = 1;
-        const Z: u16 = 2;
-        const N: u16 = 4;
-        const OS_MODE: u16 = 0x8000;
         
         fn nzp(machine: &mut Machine, mut trace: Option<&mut Trace>, value: i16) {
             use core::cmp::Ordering::*;
@@ -208,15 +233,36 @@ impl Machine {
             }
         }
         
-        fn branch_on(machine: &Machine, immediate: i16, bits: u16) -> u16 {
-            if machine.psr & bits > 0 {
-                (machine.pc as i32 + 1 + immediate as i32) as u16 
+        fn branch_on(machine: &Machine, instruction: Instruction, bits: u16) -> Result<u16, ExecutionError> {
+            let pc = if machine.psr & bits > 0 {
+                (machine.pc as i32 + 1 + instruction.immediate as i32) as u16 
             } else {
                 machine.pc + 1
+            };
+            
+            if pc >= 0x2000 && pc < 0x8000 || pc >= 0xA000 {
+                Err(ExecutionError {
+                    kind: ExecutionErrorKind::InvalidJump { address: pc },
+                    pc: machine.pc,
+                })
+            } else {
+               Ok(pc)
             }
         }
         
-        // @Speed do these get inlines properly?
+        fn jump_to(machine: &mut Machine, address: u16, from_pc_plus_one: bool) -> Result<(), ExecutionError> {
+            if address >= 0x2000 && address < 0x8000 || address >= 0xA000 {
+                Err(ExecutionError {
+                    kind:ExecutionErrorKind::InvalidJump { address },
+                    pc: if from_pc_plus_one { machine.pc + 1 } else { machine.pc },
+                })
+            } else {
+                machine.pc = address;
+                Ok(())
+            }
+        }
+        
+        // @Speed do these get inlined properly?
         fn binary(machine: &mut Machine, mut trace: Option<&mut Trace>, instruction: Instruction, f: fn(i16, i16) -> i16) {
             let rs = machine.registers[instruction.rs as usize];
             let rt = machine.registers[instruction.rt as usize];
@@ -225,7 +271,7 @@ impl Machine {
             machine.pc += 1;
         }
 
-        // @Speed do these get inlines properly?
+        // @Speed do these get inlined properly?
         fn binary_immediate(machine: &mut Machine, mut trace: Option<&mut Trace>, instruction: Instruction, f: fn(i16, i16) -> i16) {
             let rs = machine.registers[instruction.rs as usize];
             let immediate = instruction.immediate;
@@ -248,9 +294,24 @@ impl Machine {
             machine.pc += 1;
         }
         
-        // @Todo checks !
-        fn load(machine: &mut Machine, mut trace: Option<&mut Trace>, instruction: Instruction) -> Result<(), ()> {
+        fn check_address(machine: &Machine, address: u16, is_read: bool) -> Result<(), ExecutionError> {
+            let lacks_privilege = if address >= 0x8000 && !machine.os_mode() {
+                true
+            } else if address < 0x2000 || address >= 0x8000 && address == 0xA000 {
+                false
+            } else {
+                return Ok(());
+            };
+            
+            Err(ExecutionError {
+                kind: ExecutionErrorKind::InvalidMemoryAccess { address, lacks_privilege, is_read },
+                pc: machine.pc,
+            })
+        }
+        
+        fn load(machine: &mut Machine, mut trace: Option<&mut Trace>, instruction: Instruction) -> Result<(), ExecutionError> {
             let address = (machine.registers[instruction.rs as usize] + instruction.immediate) as u16;
+            check_address(machine, address, true)?;
             let value = machine.memory[address as usize] as i16;
             write_to_register(machine, trace.as_deref_mut(), instruction.rd, value);
             machine.pc += 1;
@@ -263,9 +324,9 @@ impl Machine {
             Ok(())
         }
 
-        // @Todo checks !
-        fn store(machine: &mut Machine, mut trace: Option<&mut Trace>, instruction: Instruction) -> Result<(), ()> {
+        fn store(machine: &mut Machine, mut trace: Option<&mut Trace>, instruction: Instruction) -> Result<(), ExecutionError> {
             let address = (machine.registers[instruction.rs as usize] + instruction.immediate) as u16;
+            check_address(machine, address, false)?;
             let value = machine.registers[instruction.rt as usize] as u16;
             machine.memory[address as usize] = value;
             machine.pc += 1;
@@ -279,14 +340,14 @@ impl Machine {
         }
 
         match instruction.ty {
-            InstructionType::Nop   => self.pc = branch_on(self, instruction.immediate, 0),
-            InstructionType::Brp   => self.pc = branch_on(self, instruction.immediate, P),
-            InstructionType::Brz   => self.pc = branch_on(self, instruction.immediate, Z),
-            InstructionType::Brzp  => self.pc = branch_on(self, instruction.immediate, Z | P),
-            InstructionType::Brn   => self.pc = branch_on(self, instruction.immediate, N),
-            InstructionType::Brnp  => self.pc = branch_on(self, instruction.immediate, N | P),
-            InstructionType::Brnz  => self.pc = branch_on(self, instruction.immediate, N | Z),
-            InstructionType::Brnzp => self.pc = branch_on(self, instruction.immediate, N | Z | P),
+            InstructionType::Nop   => self.pc = branch_on(self, instruction, 0)?,
+            InstructionType::Brp   => self.pc = branch_on(self, instruction, P)?,
+            InstructionType::Brz   => self.pc = branch_on(self, instruction, Z)?,
+            InstructionType::Brzp  => self.pc = branch_on(self, instruction, Z | P)?,
+            InstructionType::Brn   => self.pc = branch_on(self, instruction, N)?,
+            InstructionType::Brnp  => self.pc = branch_on(self, instruction, N | P)?,
+            InstructionType::Brnz  => self.pc = branch_on(self, instruction, N | Z)?,
+            InstructionType::Brnzp => self.pc = branch_on(self, instruction, N | Z | P)?,
             InstructionType::Add => binary(self, trace, instruction, i16::wrapping_add),
             InstructionType::Mul => binary(self, trace, instruction, i16::wrapping_mul),
             InstructionType::Sub => binary(self, trace, instruction, i16::wrapping_sub),
@@ -338,21 +399,21 @@ impl Machine {
                 let rs = self.registers[instruction.rs as usize] as u16;
                 self.pc += 1;
                 write_to_register(self, trace, 7, self.pc as i16);
-                self.pc = rs;
+                jump_to(self, rs, true)?;
             },
             InstructionType::Jsr => {
                 let immediate = instruction.immediate as u16;
                 self.pc += 1;
                 write_to_register(self, trace, 7, self.pc as i16);
-                self.pc = (self.pc & OS_MODE) | (immediate << 4);
+                jump_to(self, (self.pc & OS_MODE) | (immediate << 4), true)?;
             },
             InstructionType::Jmpr => {
                 let rs = self.registers[instruction.rs as usize] as u16;
-                self.pc = rs;
+                jump_to(self, rs, false)?;
             },
             InstructionType::Jmp => {
                 let immediate = instruction.immediate;
-                self.pc = (self.pc as i16 + 1 + immediate) as u16;
+                jump_to(self, (self.pc as i16 + 1 + immediate) as u16, false)?;
             },
             InstructionType::Trap => {
                 self.pc += 1;
@@ -366,20 +427,33 @@ impl Machine {
                 self.psr &= !OS_MODE;
             },
         }
-        Ok(())
+        
+        // All jump style instructions check their jump location ahead of time
+        // So here we just check if we ran over from the previous instruction
+        if self.pc >= 0x2000 && self.pc < 0x8000 || self.pc >= 0xA000 {
+            Err(ExecutionError {
+                kind: ExecutionErrorKind::PcRollover,
+                pc: self.pc - 1,
+            })
+        } else {
+            Ok(())
+        }
     }
     
-    pub fn step(&mut self, mut trace: Option<&mut Trace>) -> Result<(), ()> {
+    pub fn step(&mut self, mut trace: Option<&mut Trace>) -> Result<(), ExecutionError> {
         let pc = self.pc;
         let instruction_word = self.memory[pc as usize];
-        let instruction = decode::decode(instruction_word, trace.as_deref_mut()).expect("Valid Instruction");
+        let instruction = decode::decode(instruction_word, trace.as_deref_mut()).map_err(|_| ExecutionError {
+            kind:ExecutionErrorKind::InvalidInstruction,
+            pc: self.pc,
+        })?;
 
         if let Some(trace) = trace.as_deref_mut() {
             trace.current_pc = pc;
             trace.current_instruction = instruction_word;
         }
         
-        self.execute_instruction(instruction, trace.as_deref_mut()).expect("No execution errors.");
+        self.execute_instruction(instruction, trace.as_deref_mut())?;
 
         Ok(())
     }
@@ -390,10 +464,15 @@ pub struct Options {
     pub trace_path: Option<PathBuf>,
     pub input_paths: Vec<PathBuf>,
     pub step_cap: Option<u64>,
+    pub loader_trace: bool,
 }
 
+// @Todo keep the machine around after an error
 pub fn run(options: Options) {
     let mut machine = Machine::new();
+
+    let mut stdout = std::io::stdout();
+
     for path in &options.input_paths {
         let bytes = match std::fs::read(path) {
             Ok(bytes) => bytes,
@@ -402,8 +481,8 @@ pub fn run(options: Options) {
                 continue;
             }
         };
-        // loader::load(&bytes, &mut machine, Some(&mut std::io::stdout())).expect("Load failure");
-        loader::load(&bytes, &mut machine, None).expect("Load failure");
+        let loader_trace = options.loader_trace.then(|| &mut stdout as _); // unsizing coercion
+        loader::load(&bytes, &mut machine, loader_trace).expect("Load failure");
     }
     
     let mut trace_file = options.trace_path.as_ref().map(|path| {
@@ -415,19 +494,15 @@ pub fn run(options: Options) {
     while machine.pc() != 0x80ff {
         steps += 1;
         match options.step_cap {
-            Some(cap) if steps > cap => break,     // @Todo error
+            Some(cap) if steps > cap => break,
             _ => {},
         }
-
-        let mut trace = if options.trace_path.is_some() {
-            Some(Trace::new())
-        } else {
-            None
-        };
+        
+        let mut trace = options.trace_path.as_ref().map(|_| Trace::new());
         match machine.step(trace.as_mut()) {
             Ok(()) => {},
-            Err(()) => {
-                eprintln!("Error");
+            Err(e) => {
+                eprintln!("Error: {:?}", e);
                 break;
             }
         }

@@ -502,7 +502,6 @@ fn patch<'a>(blocks: &mut [Block<'a>]) -> Result<HashMap<&'a str, u16>, Vec<Stri
                             Brp | Brz | Brzp | Brn | Brnp | Brnz | Brnzp | Jmp => {
                                 instruction.immediate = (*address) as i32 - current - 1;
                                 if !number_fits(instruction.immediate, true, if matches!(instruction.ty, Jmp) { 11 } else { 9 }) {
-                                    // @Todo Idk what more to say, but this feels like a shitty error message
                                     errors.push(format!("Jump to label '{}' is too far.", label));
                                     continue;
                                 }
