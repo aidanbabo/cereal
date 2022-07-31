@@ -1,7 +1,9 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::marker::PhantomData;
+use std::fs::{self, File};
+use std::io::Write;
 
 pub mod printer;
 pub mod assembler;
@@ -322,7 +324,76 @@ pub fn compile_c<'container, 'source>(
     c::compile(filename, string, blocks, constants)
 }
 
-pub fn compile_and_link(blocks: &mut [Block], constants: &HashMap<&str, i32>, debug_info: bool) -> Result<Vec<u8>, ()> {
+pub struct Options {
+    pub output_path: PathBuf,
+    pub debug_info: bool,
+    pub input_paths: Vec<PathBuf>,
+}
+
+pub fn compile(options: Options) -> Result<(), ()> {
+
+    let mut blocks = Vec::new();
+    let mut constants = HashMap::new();
+    let mut file_strings = Vec::new();
+    
+    for path in &options.input_paths {
+        let string = match fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                println!("Failed to open file '{:?}': {}", path, e);
+                return Err(());
+            }
+        };
+        file_strings.push(string);
+    }
+
+    for i in 0..options.input_paths.len() {
+        let path = &options.input_paths[i];
+        let extension = if let Some(e) = path.extension() {
+            e
+        } else {
+            println!("Cannot read file path extension for file '{:?}'", path);
+            return Err(());
+        };
+
+        if extension == "asm" {
+            match assemble(path, &file_strings[i], &mut blocks, &mut constants) {
+                Ok(()) => (),
+                Err(()) => return Err(()),
+            }
+        } else if extension == "c" {
+            match compile_c(path, &file_strings[i], &mut blocks, &mut constants) {
+                Ok(()) => (),
+                Err(()) => return Err(()),
+            }
+        } else {
+            println!("ERROR: Only accepting .asm and .c files as inputs. Cannot compile '{:?}'", path);
+            return Err(());
+        }
+    }
+    
+    let bytes = match link(&mut blocks, &constants, options.debug_info) {
+        Ok(bytes) => bytes,
+        Err(())=> return Err(()),
+    };
+
+    let mut file = match File::create(&options.output_path) {
+        Ok(file) => file,
+        Err(error) => {
+            println!("Could not create object file '{:?}': {}.", &options.output_path, error);
+            return Err(());
+        }
+    };
+
+    if let Err(error) = file.write_all(&bytes[..]) {
+        println!("Failed to write to object file '{:?}': {}.", &options.output_path, error);
+        return Err(());
+    }
+    
+    Ok(())
+}
+
+pub fn link(blocks: &mut [Block], constants: &HashMap<&str, i32>, debug_info: bool) -> Result<Vec<u8>, ()> {
     
     // println!("PRINTED:");
     // printer::print_blocks(blocks, constants).unwrap();
@@ -758,6 +829,61 @@ fn instruction_operands(instruction_type: InstructionType, ops: &mut [Operand]) 
 mod insn {
     use super::*;
     use InstructionType::*;
+
+    pub fn add(rd: i8, rs: i8, rt: i8) -> InstructionWithLabel<'static> {
+        InstructionWithLabel {
+            ty: Add,
+            rd,
+            rs,
+            rt,
+            immediate: -1,
+            label: None,
+        }
+    }
+
+    pub fn sub(rd: i8, rs: i8, rt: i8) -> InstructionWithLabel<'static> {
+        InstructionWithLabel {
+            ty: Sub,
+            rd,
+            rs,
+            rt,
+            immediate: -1,
+            label: None,
+        }
+    }
+
+    pub fn mul(rd: i8, rs: i8, rt: i8) -> InstructionWithLabel<'static> {
+        InstructionWithLabel {
+            ty: Mul,
+            rd,
+            rs,
+            rt,
+            immediate: -1,
+            label: None,
+        }
+    }
+
+    pub fn div(rd: i8, rs: i8, rt: i8) -> InstructionWithLabel<'static> {
+        InstructionWithLabel {
+            ty: Div,
+            rd,
+            rs,
+            rt,
+            immediate: -1,
+            label: None,
+        }
+    }
+
+    pub fn mod_(rd: i8, rs: i8, rt: i8) -> InstructionWithLabel<'static> {
+        InstructionWithLabel {
+            ty: Mod,
+            rd,
+            rs,
+            rt,
+            immediate: -1,
+            label: None,
+        }
+    }
 
     pub fn addi(rd: i8, rs: i8, immediate: i32) -> InstructionWithLabel<'static> {
         InstructionWithLabel {

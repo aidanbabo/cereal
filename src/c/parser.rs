@@ -13,8 +13,36 @@ pub enum Literal<'s> {
 }
 
 #[derive(Debug)]
+pub enum BinaryType {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+}
+
+impl BinaryType {
+    fn precedence(&self) -> u8 {
+        use BinaryType::*;
+        match *self {
+            Add | Sub => 5,
+            Mul | Div | Mod => 6,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Binary<'s> {
+    pub left: Box<Expression<'s>>,
+    pub ty: BinaryType,
+    pub right: Box<Expression<'s>>,
+}
+
+
+#[derive(Debug)]
 pub enum ExpressionType<'s> {
     Literal(Literal<'s>),
+    Binary(Binary<'s>)
 }
 
 #[derive(Debug)]
@@ -96,13 +124,7 @@ impl<'s> Parser<'s> {
         })
     }
     
-    /*
-    fn next_token_of_type(&mut self, ty: TokenType) -> Result<Token<'s>, Error> {
-        let token = self.next_token_expected
-    }
-    */
-    
-    fn expression(&mut self) -> Result<Expression<'s>, Error> {
+    fn expression(&mut self, precedence: u8) -> Result<Expression<'s>, Error> {
         use crate::c::lexer;
         let num = self.next_token_expected("numeric literal")?;
         let n = if let TokenType::Literal(lexer::Literal::Numeric(n)) = num.ty {
@@ -112,10 +134,42 @@ impl<'s> Parser<'s> {
         };
         let literal = Literal::Numeric(n.spanned(num.span));
         let ty = ExpressionType::Literal(literal);
-        let expr = Expression {
+        let mut expr = Expression {
             ty,
             expr_ty: None,
         };
+        
+        // The most based of parsing techniques
+        // All I know about Pratt parsing is that there is a loop and recursion
+        while let Some(next) = self.peek() {
+            let ty = match next.ty {
+                TokenType::Plus => Some(BinaryType::Add),
+                TokenType::Minus => Some(BinaryType::Sub),
+                TokenType::Star => Some(BinaryType::Mul),
+                TokenType::Slash => Some(BinaryType::Div),
+                TokenType::Percent => Some(BinaryType::Mod),
+                _ => None,
+            };
+            if let Some(ty) = ty {
+                if ty.precedence() >= precedence {
+                    let _op = self.consume().unwrap();
+                    let right = self.expression(ty.precedence())?;
+                    let binary = Binary {
+                        left: Box::new(expr),
+                        ty,
+                        right: Box::new(right),
+                    };
+                    expr = Expression {
+                        ty: ExpressionType::Binary(binary),
+                        expr_ty: None,
+                    };
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
         Ok(expr)
     }
     
@@ -126,14 +180,14 @@ impl<'s> Parser<'s> {
         };
         let return_value = match next.ty {
             TokenType::Semicolon => None,
-            _ => Some(self.expression()?)
+            _ => Some(self.expression(0)?)
         };
         let _semicolon = self.next_token_expected("';'")?;
         
-        let _return = Return {
+        let return_ = Return {
             expr: return_value,
         };
-        Ok(_return.spanned(ret.span))
+        Ok(return_.spanned(ret.span))
     }
     
     fn statement(&mut self) -> Option<Result<Statement<'s>, Error>> {
@@ -184,10 +238,7 @@ impl<'s> Parser<'s> {
         let identifier = self.next_token_expected_of_type("an identifier", TokenType::Identifier)?;
         let third = self.next_token_expected_of_type("'('", TokenType::LeftParen)?;
         
-        let top_level_ty = match third.ty {
-            TokenType::LeftParen => TopLevelType::Procedure(self.procedure(ty, identifier, third)?),
-            _ => return Err(format!("Expected '(', found '{}'", third.chars)),
-        };
+        let top_level_ty = TopLevelType::Procedure(self.procedure(ty, identifier, third)?);
         
         Ok(TopLevel { ty: top_level_ty })
     }

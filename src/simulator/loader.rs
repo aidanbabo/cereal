@@ -8,7 +8,7 @@ use super::decode::{decode, InvalidInstructionError};
 fn print_instruction(word: u16, trace: &mut dyn Write) -> io::Result<()> {
     let instruction = decode(word, None);
     match instruction {
-        Ok(instruction) => writeln!(trace, "\t{}", instruction.ty.to_mnemonic())?,
+        Ok(instruction) => writeln!(trace, "\t{}", instruction)?,
         Err(InvalidInstructionError) => writeln!(trace, "\tInvalid Instruction")?,
     }
     Ok(())

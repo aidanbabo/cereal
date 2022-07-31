@@ -96,6 +96,49 @@ struct Instruction {
     immediate: i16,
 }
 
+impl std::fmt::Display for Instruction {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self.ty {
+            InstructionType::Nop => write!(f, "{}", self.ty.to_mnemonic()),
+            InstructionType::Brp => write!(f, "{} #{}", self.ty.to_mnemonic(), self.immediate),
+            InstructionType::Brz => write!(f, "{} #{}", self.ty.to_mnemonic(), self.immediate),
+            InstructionType::Brzp => write!(f, "{} #{}", self.ty.to_mnemonic(), self.immediate),
+            InstructionType::Brn => write!(f, "{} #{}", self.ty.to_mnemonic(), self.immediate),
+            InstructionType::Brnp => write!(f, "{} #{}", self.ty.to_mnemonic(), self.immediate),
+            InstructionType::Brnz => write!(f, "{} #{}", self.ty.to_mnemonic(), self.immediate),
+            InstructionType::Brnzp => write!(f, "{} #{}", self.ty.to_mnemonic(), self.immediate),
+            InstructionType::Add => write!(f, "{} r{}, r{}, r{}", self.ty.to_mnemonic(), self.rd, self.rs, self.rt),
+            InstructionType::Mul => write!(f, "{} r{}, r{}, r{}", self.ty.to_mnemonic(), self.rd, self.rs, self.rt),
+            InstructionType::Sub => write!(f, "{} r{}, r{}, r{}", self.ty.to_mnemonic(), self.rd, self.rs, self.rt),
+            InstructionType::Div => write!(f, "{} r{}, r{}, r{}", self.ty.to_mnemonic(), self.rd, self.rs, self.rt),
+            InstructionType::Addi => write!(f, "{} r{}, r{}, #{}", self.ty.to_mnemonic(), self.rd, self.rs, self.immediate),
+            InstructionType::Mod => write!(f, "{} r{}, r{}, r{}", self.ty.to_mnemonic(), self.rd, self.rs, self.rt),
+            InstructionType::And => write!(f, "{} r{}, r{}, r{}", self.ty.to_mnemonic(), self.rd, self.rs, self.rt),
+            InstructionType::Not => write!(f, "{} r{}, r{}", self.ty.to_mnemonic(), self.rd, self.rs),
+            InstructionType::Or => write!(f, "{} r{}, r{}, r{}", self.ty.to_mnemonic(), self.rd, self.rs, self.rt),
+            InstructionType::Xor => write!(f, "{} r{}, r{}, r{}", self.ty.to_mnemonic(), self.rd, self.rs, self.rt),
+            InstructionType::Andi => write!(f, "{} r{}, r{}, #{}", self.ty.to_mnemonic(), self.rd, self.rs, self.immediate),
+            InstructionType::Ldr => write!(f, "{} r{}, r{}, #{}", self.ty.to_mnemonic(), self.rd, self.rt, self.immediate),
+            InstructionType::Str => write!(f, "{} r{}, r{}, #{}", self.ty.to_mnemonic(), self.rt, self.rs, self.immediate),
+            InstructionType::Const => write!(f, "{} r{}, #{}", self.ty.to_mnemonic(), self.rd, self.immediate),
+            InstructionType::Hiconst => write!(f, "{} r{}, #{}", self.ty.to_mnemonic(), self.rd, self.immediate),
+            InstructionType::Cmp => write!(f, "{} r{}, r{}, r{}", self.ty.to_mnemonic(), self.rd, self.rs, self.rt),
+            InstructionType::Cmpu => write!(f, "{} r{}, r{}, r{}", self.ty.to_mnemonic(), self.rd, self.rs, self.rt),
+            InstructionType::Cmpi => write!(f, "{} r{}, r{}, #{}", self.ty.to_mnemonic(), self.rd, self.rs, self.immediate),
+            InstructionType::Cmpiu => write!(f, "{} r{}, r{}, #{}", self.ty.to_mnemonic(), self.rd, self.rs, self.immediate as i16 as u16),
+            InstructionType::Sll => write!(f, "{}, r{}, r{}, #{}", self.ty.to_mnemonic(), self.rd, self.rs, self.immediate),
+            InstructionType::Sra => write!(f, "{}, r{}, r{}, #{}", self.ty.to_mnemonic(), self.rd, self.rs, self.immediate),
+            InstructionType::Srl => write!(f, "{}, r{}, r{}, #{}", self.ty.to_mnemonic(), self.rd, self.rs, self.immediate),
+            InstructionType::Jsrr => write!(f, "{} r{}", self.ty.to_mnemonic(), self.rs),
+            InstructionType::Jsr => write!(f, "{} #{}", self.ty.to_mnemonic(), self.immediate),
+            InstructionType::Jmpr => write!(f, "{} r{}", self.ty.to_mnemonic(), self.rs),
+            InstructionType::Jmp => write!(f, "{} #{}", self.ty.to_mnemonic(), self.immediate),
+            InstructionType::Trap => write!(f, "{} 0x{:02x}", self.ty.to_mnemonic(), self.immediate),
+            InstructionType::Rti => write!(f, "{}", self.ty.to_mnemonic()),
+        }
+    }
+}
+
 mod write_enable_consts {
     pub const NZP_WRITE_ENABLE: u16 = 1;
     pub const REGISTER_FILE_WRITE_ENABLE: u16 = 2;
@@ -297,7 +340,7 @@ impl Machine {
         fn check_address(machine: &Machine, address: u16, is_read: bool) -> Result<(), ExecutionError> {
             let lacks_privilege = if address >= 0x8000 && !machine.os_mode() {
                 true
-            } else if address < 0x2000 || address >= 0x8000 && address == 0xA000 {
+            } else if address < 0x2000 || address >= 0x8000 && address < 0xA000 {
                 false
             } else {
                 return Ok(());
@@ -423,8 +466,8 @@ impl Machine {
                 self.psr |= OS_MODE;
             },
             InstructionType::Rti => {
-                self.pc = self.registers[7] as u16;
                 self.psr &= !OS_MODE;
+                jump_to(self, self.registers[7] as u16, false)?;
             },
         }
         
@@ -468,7 +511,7 @@ pub struct Options {
 }
 
 // @Todo keep the machine around after an error
-pub fn run(options: Options) {
+pub fn run(options: Options) -> i16 {
     let mut machine = Machine::new();
 
     let mut stdout = std::io::stdout();
@@ -510,4 +553,6 @@ pub fn run(options: Options) {
             trace.write_to_file(trace_file.as_mut().unwrap()).expect("Failed to write to a file");
         }
     }
+    
+    machine.registers[0]
 }

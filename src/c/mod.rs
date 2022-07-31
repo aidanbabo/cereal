@@ -27,9 +27,11 @@ pub fn compile<'container, 'source>(
     }
     
     if errors.is_empty() {
+        /*
         for token in &tokens {
             println!("{:?}", token);
         }
+        */
     } else {
         println!("Errors in file {:?}", filename);
         for error in errors {
@@ -41,7 +43,7 @@ pub fn compile<'container, 'source>(
     let mut parser = Parser::new(tokens);
     let mut ast = Vec::new();
     match parser.fill(&mut ast) {
-        Ok(()) => println!("{:#?}", ast),
+        Ok(()) => {},// println!("{:#?}", ast),
         Err(error) => {
             println!("Errors in file {:?}", filename);
             println!("{}", error);

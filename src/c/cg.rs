@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{Block, BlockType, InstructionWithLabel};
-use crate::c::parser::{TopLevel, TopLevelType, Procedure, Statement, StatementType, Return, Expression, ExpressionType, Literal};
+use crate::c::parser::{TopLevel, TopLevelType, Procedure, Statement, StatementType, Return, Expression, ExpressionType, Literal, Binary, BinaryType};
 use crate::insn;
 
 pub fn generate<'c, 's>(ast: Vec<TopLevel<'s>>, blocks: &'c mut Vec<Block<'s>>, constants: &'c mut HashMap<&'s str, i32>) {
@@ -21,6 +21,7 @@ struct CgContext<'c, 's> {
     blocks: &'c mut Vec<Block<'s>>, 
     _constants: &'c mut HashMap<&'s str, i32>,
     available_registers: Vec<i8>,
+    stack_slots_spilled: usize,
 }
 
 impl<'c, 's> CgContext<'c, 's> {
@@ -28,7 +29,8 @@ impl<'c, 's> CgContext<'c, 's> {
         CgContext {
             blocks,
             _constants,
-            available_registers: vec![0, 1, 2, 3, 4, 7], // fp and sp reserved
+            available_registers: vec![0, 1, 2, 3, 4], // fp, sp, and ret reserved
+            stack_slots_spilled: 0,
         }
     }
     
@@ -42,12 +44,24 @@ impl<'c, 's> CgContext<'c, 's> {
         }
     }
     
-    fn take_available_register(&mut self) -> i8 {
-        self.available_registers.pop().unwrap()
+    fn take_available_register(&mut self, not: Option<i8>) -> i8 {
+        self.available_registers.pop().unwrap_or_else(|| {
+            let reg = not.map_or(0, |not| (not + 1) % 4);
+            self.instructions().push(insn::addi(6, 6, -1));
+            self.instructions().push(insn::str(reg, 6, 0));
+            self.stack_slots_spilled += 1;
+            reg
+        })
     }
 
     fn return_available_register(&mut self, reg: i8) {
-        self.available_registers.push(reg)
+        if self.stack_slots_spilled > 0 {
+            self.instructions().push(insn::ldr(reg, 6, 0));
+            self.instructions().push(insn::addi(6, 6, 1));
+            self.stack_slots_spilled -= 1;
+        } else {
+            self.available_registers.push(reg)
+        }
     }
 
     fn generate_top_level(&mut self, top_level: TopLevel<'s>) {
@@ -104,7 +118,34 @@ impl<'c, 's> CgContext<'c, 's> {
     fn generate_expression(&mut self, expression: Expression<'s>, location: Location) {
         match expression.ty {
             ExpressionType::Literal(literal) => self.generate_literal(literal, location),
+            ExpressionType::Binary(binary) => self.generate_binary(binary, location),
         }
+    }
+
+    fn generate_binary(&mut self, binary: Binary<'s>, location: Location) {
+        let (dest, needs_move) = if let Location::Register(dest) = location {
+            (dest, false)
+        } else {
+            (self.take_available_register(None), true)
+        };
+        
+        self.generate_expression(*binary.left, Location::Register(dest));
+        let reg = self.take_available_register(Some(dest));
+        self.generate_expression(*binary.right, Location::Register(reg));
+        match binary.ty {
+            BinaryType::Add => self.instructions().push(insn::add(dest, dest, reg)),
+            BinaryType::Sub => self.instructions().push(insn::sub(dest, dest, reg)),
+            BinaryType::Mul => self.instructions().push(insn::mul(dest, dest, reg)),
+            BinaryType::Div => self.instructions().push(insn::div(dest, dest, reg)),
+            BinaryType::Mod => self.instructions().push(insn::mod_(dest, dest, reg)),
+        }
+        
+        if needs_move {
+            self.mov(location, Location::Register(dest));
+            self.return_available_register(dest);
+        }
+        
+        self.return_available_register(reg);
     }
 
     fn generate_literal(&mut self, literal: Literal<'s>, location: Location) {
@@ -113,7 +154,7 @@ impl<'c, 's> CgContext<'c, 's> {
                 let (reg, needs_move) = if let Location::Register(reg) = location {
                     (reg, false)
                 } else {
-                    (self.take_available_register(), true)
+                    (self.take_available_register(None), true)
                 };
             
                 let instructions = self.instructions();
