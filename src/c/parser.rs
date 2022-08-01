@@ -21,16 +21,6 @@ pub enum BinaryType {
     Mod,
 }
 
-impl BinaryType {
-    fn precedence(&self) -> u8 {
-        use BinaryType::*;
-        match *self {
-            Add | Sub => 5,
-            Mul | Div | Mod => 6,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct Binary<'s> {
     pub left: Box<Expression<'s>>,
@@ -84,6 +74,71 @@ pub struct TopLevel<'s> {
     pub ty: TopLevelType<'s>,
 }
 
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
+enum Precedence {
+    None = 0,
+    Assignment = 1,
+    Term = 2,
+    Factor = 3,
+    Primary = 4
+}
+
+impl Precedence {
+    fn higher(self) -> Self {
+        use Precedence::*;
+        match self {
+            None => Assignment,
+            Assignment => Term,
+            Term => Factor,
+            Factor => Primary,
+            Primary => unreachable!("Tried to get a super high precedence"),
+        }
+    }
+}
+
+type PrefixFunction<'s> = fn(&mut Parser<'s>) -> Result<Expression<'s>, Error>;
+type InfixFunction<'s> = fn(&mut Parser<'s>, Expression<'s>) -> Result<Expression<'s>, Error>;
+
+struct Rule<'s> {
+    precedence: Precedence,
+    prefix: Option<PrefixFunction<'s>>,
+    infix: Option<InfixFunction<'s>>,
+}
+
+impl<'s> Rule<'s> {
+    fn for_type(ty: TokenType) -> Rule<'s> {
+        use TokenType::*;
+        match ty {
+            Literal(_) => Rule {
+                precedence: Precedence::None,
+                prefix: Some(Parser::numeric_literal),
+                infix: None,
+            },
+            Plus | Minus => Rule {
+                precedence: Precedence::Term,
+                prefix: None,
+                infix: Some(Parser::binary),
+            },
+            Star | Slash | Percent => Rule {
+                precedence: Precedence::Factor,
+                prefix: None,
+                infix: Some(Parser::binary),
+            },
+            LeftParen => Rule {
+                precedence: Precedence::None,
+                prefix: Some(Parser::grouping),
+                infix: None,
+            },
+
+            Identifier | Return | Int | RightParen | LeftBrace | RightBrace | Semicolon => Rule {
+                precedence: Precedence::None,
+                prefix: None,
+                infix: None,
+            },
+        }
+    }
+}
+
 
 pub struct Parser<'s> {
     tokens: Vec<S<'s, Token<'s>>>,
@@ -124,8 +179,16 @@ impl<'s> Parser<'s> {
         })
     }
     
-    fn expression(&mut self, precedence: u8) -> Result<Expression<'s>, Error> {
+    fn grouping(&mut self) -> Result<Expression<'s>, Error> {
+        self.consume();
+        let expr = self.expression()?;
+        self.next_token_expected_of_type("')'", TokenType::RightParen)?;
+        Ok(expr)
+    }
+    
+    fn numeric_literal(&mut self) -> Result<Expression<'s>, Error> {
         use crate::c::lexer;
+        
         let num = self.next_token_expected("numeric literal")?;
         let n = if let TokenType::Literal(lexer::Literal::Numeric(n)) = num.ty {
             n
@@ -134,43 +197,68 @@ impl<'s> Parser<'s> {
         };
         let literal = Literal::Numeric(n.spanned(num.span));
         let ty = ExpressionType::Literal(literal);
-        let mut expr = Expression {
+        let expr = Expression {
             ty,
             expr_ty: None,
         };
         
-        // The most based of parsing techniques
-        // All I know about Pratt parsing is that there is a loop and recursion
-        while let Some(next) = self.peek() {
-            let ty = match next.ty {
-                TokenType::Plus => Some(BinaryType::Add),
-                TokenType::Minus => Some(BinaryType::Sub),
-                TokenType::Star => Some(BinaryType::Mul),
-                TokenType::Slash => Some(BinaryType::Div),
-                TokenType::Percent => Some(BinaryType::Mod),
-                _ => None,
+        Ok(expr)
+    }
+    
+    fn binary(&mut self, left: Expression<'s>) -> Result<Expression<'s>, Error> {
+        let op = self.consume().unwrap();
+        let ty = match op.ty {
+            TokenType::Plus => BinaryType::Add,
+            TokenType::Minus => BinaryType::Sub,
+            TokenType::Star => BinaryType::Mul,
+            TokenType::Slash => BinaryType::Div,
+            TokenType::Percent => BinaryType::Mod,
+            _ => unreachable!("Input to this function must be binary op"),
+        };
+        let precedence = Rule::for_type(op.ty).precedence;
+        let right = self.parse_precedence(precedence.higher())?;
+        let binary = Binary {
+            left: Box::new(left),
+            ty,
+            right: Box::new(right),
+        };
+        let expr = Expression {
+            ty: ExpressionType::Binary(binary),
+            expr_ty: None,
+        };
+
+        Ok(expr)
+    }
+    
+    fn parse_precedence(&mut self, precedence: Precedence) -> Result<Expression<'s>, Error> {
+        let prefix = self.peek().map(|t| Rule::for_type(t.ty).prefix).flatten();
+        let prefix = if let Some(p) = prefix {
+            p
+        } else {
+            return Err("Expected expression".to_string());
+        };
+        
+        let mut expr = prefix(self)?;
+        
+        loop {
+            let infix = if let Some(i) = self.peek().map(|t| Rule::for_type(t.ty)) {
+                i
+            } else {
+                break;
             };
-            if let Some(ty) = ty {
-                if ty.precedence() >= precedence {
-                    let _op = self.consume().unwrap();
-                    let right = self.expression(ty.precedence())?;
-                    let binary = Binary {
-                        left: Box::new(expr),
-                        ty,
-                        right: Box::new(right),
-                    };
-                    expr = Expression {
-                        ty: ExpressionType::Binary(binary),
-                        expr_ty: None,
-                    };
-                } else {
-                    break;
-                }
+            
+            if precedence <= infix.precedence {
+                expr = infix.infix.unwrap()(self, expr)?;
             } else {
                 break;
             }
         }
+        
         Ok(expr)
+    }
+    
+    fn expression(&mut self) -> Result<Expression<'s>, Error> {
+       self.parse_precedence(Precedence::Assignment)
     }
     
     fn return_statement(&mut self, ret: S<'s, Token<'s>>) -> Result<S<'s, Return<'s>>, Error> {
@@ -180,7 +268,7 @@ impl<'s> Parser<'s> {
         };
         let return_value = match next.ty {
             TokenType::Semicolon => None,
-            _ => Some(self.expression(0)?)
+            _ => Some(self.expression()?)
         };
         let _semicolon = self.next_token_expected("';'")?;
         

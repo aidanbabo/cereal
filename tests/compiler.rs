@@ -18,6 +18,18 @@ fn precedence2() {
     assert_eq!(result, 30);
 }
 
+#[test]
+fn grouping() {
+    let result = simple_compiler_test(&["data/c/grouping.c"], "data/tests/c/grouping.obj");
+    assert_eq!(result, 50);
+}
+
+#[test]
+fn grouping2() {
+    let result = simple_compiler_test(&["data/c/grouping2.c"], "data/tests/c/grouping2.obj");
+    assert_eq!(result, 50);
+}
+
 fn simple_compiler_test(input: &[&str], output: &str) -> i16 {
     
     let mut inputs = Vec::new();
