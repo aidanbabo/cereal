@@ -30,6 +30,18 @@ fn grouping2() {
     assert_eq!(result, 50);
 }
 
+#[test]
+fn negation() {
+    let result = simple_compiler_test(&["data/c/negation.c"], "data/tests/c/negation.obj");
+    assert_eq!(result, -10);
+}
+
+#[test]
+fn bit() {
+    let result = simple_compiler_test(&["data/c/bit.c"], "data/tests/c/bit.obj");
+    assert_eq!(result, 1);
+}
+
 fn simple_compiler_test(input: &[&str], output: &str) -> i16 {
     
     let mut inputs = Vec::new();

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{Block, BlockType, InstructionWithLabel};
-use crate::c::parser::{TopLevel, TopLevelType, Procedure, Statement, StatementType, Return, Expression, ExpressionType, Literal, Binary, BinaryType};
+use crate::c::parser::{TopLevel, TopLevelType, Procedure, Statement, StatementType, Return, Expression, ExpressionType, Literal, Unary, UnaryType, Binary, BinaryType};
 use crate::insn;
 
 pub fn generate<'c, 's>(ast: Vec<TopLevel<'s>>, blocks: &'c mut Vec<Block<'s>>, constants: &'c mut HashMap<&'s str, i32>) {
@@ -64,9 +64,120 @@ impl<'c, 's> CgContext<'c, 's> {
         }
     }
 
-    fn generate_top_level(&mut self, top_level: TopLevel<'s>) {
-        match top_level.ty {
-            TopLevelType::Procedure(procedure) => self.generate_procedure(procedure),
+    fn mov(&mut self, dst: Location, src: Location) {
+        use Location::*;
+    
+        match (dst, src) {
+            (Register(dst), Register(src)) => {
+                let instructions = self.instructions();
+                instructions.push(insn::addi(dst, src, 0));
+            }
+            _ => unreachable!("Unsupported locations dst: {:?} and src: {:?}", dst, src),
+        }
+    }
+
+    fn generate_literal(&mut self, literal: Literal<'s>, location: Location) {
+        match literal {
+            Literal::Numeric(n) => {
+                let (reg, needs_move) = if let Location::Register(reg) = location {
+                    (reg, false)
+                } else {
+                    (self.take_available_register(None), true)
+                };
+            
+                let instructions = self.instructions();
+                let num = *n;
+                instructions.push(insn::konst(reg, num));
+                if !crate::number_fits(num, true, 9) {
+                    instructions.push(insn::hiconst(reg, num >> 8));
+                }
+            
+                if needs_move {
+                    self.mov(location, Location::Register(reg));
+                    self.return_available_register(reg);
+                }
+            }
+        }
+    }
+
+    fn generate_unary(&mut self, unary: Unary<'s>, location: Location) {
+        let (dest, needs_move) = if let Location::Register(dest) = location {
+            (dest, false)
+        } else {
+            (self.take_available_register(None), true)
+        };
+        
+        self.generate_expression(*unary.expr, Location::Register(dest));
+        match *unary.ty {
+            // @Speed is there really not a one instruction way to get this sone
+            UnaryType::Negate => {
+                self.instructions().push(insn::not(dest, dest));
+                self.instructions().push(insn::addi(dest, dest, 1));
+            }
+            UnaryType::BitNot => self.instructions().push(insn::not(dest, dest)),
+            UnaryType::Plus => { /* no -op */ },
+        }
+        
+        if needs_move {
+            self.mov(location, Location::Register(dest));
+            self.return_available_register(dest);
+        }
+    }
+
+    fn generate_binary(&mut self, binary: Binary<'s>, location: Location) {
+        let (dest, needs_move) = if let Location::Register(dest) = location {
+            (dest, false)
+        } else {
+            (self.take_available_register(None), true)
+        };
+        
+        self.generate_expression(*binary.left, Location::Register(dest));
+        let reg = self.take_available_register(Some(dest));
+        self.generate_expression(*binary.right, Location::Register(reg));
+        match *binary.ty {
+            BinaryType::Add => self.instructions().push(insn::add(dest, dest, reg)),
+            BinaryType::Sub => self.instructions().push(insn::sub(dest, dest, reg)),
+            BinaryType::Mul => self.instructions().push(insn::mul(dest, dest, reg)),
+            BinaryType::Div => self.instructions().push(insn::div(dest, dest, reg)),
+            BinaryType::Mod => self.instructions().push(insn::mod_(dest, dest, reg)),
+            BinaryType::BitAnd => self.instructions().push(insn::and(dest, dest, reg)),
+            BinaryType::BitXor => self.instructions().push(insn::xor(dest, dest, reg)),
+            BinaryType::BitOr => self.instructions().push(insn::or(dest, dest, reg)),
+        }
+        
+        if needs_move {
+            self.mov(location, Location::Register(dest));
+            self.return_available_register(dest);
+        }
+        
+        self.return_available_register(reg);
+    }
+
+    fn generate_expression(&mut self, expression: Expression<'s>, location: Location) {
+        match expression.ty {
+            ExpressionType::Literal(literal) => self.generate_literal(literal, location),
+            ExpressionType::Unary(unary) => self.generate_unary(unary, location),
+            ExpressionType::Binary(binary) => self.generate_binary(binary, location),
+        }
+    }
+
+    fn generate_return(&mut self, ret: Return<'s>) {
+        if let Some(expr) = ret.expr {
+            self.generate_expression(expr, Location::Register(7));
+        }
+    
+        let instructions = self.instructions();
+    
+        instructions.push(insn::addi(6, 6, 3));    // free space for return address, base pointer, and return value
+        instructions.push(insn::str(7, 6, -1));    // store return value
+        instructions.push(insn::ldr(7, 6, -2));    // restore return address
+        instructions.push(insn::ldr(5, 6, -3));    // restore base pointer
+        instructions.push(insn::jmpr(7));          // return
+    }
+
+    fn generate_statement(&mut self, statement: Statement<'s>) {
+        match statement.ty {
+            StatementType::Return(ret) => self.generate_return(ret.t),
         }
     }
 
@@ -95,92 +206,9 @@ impl<'c, 's> CgContext<'c, 's> {
         }
     }
 
-    fn generate_statement(&mut self, statement: Statement<'s>) {
-        match statement.ty {
-            StatementType::Return(ret) => self.generate_return(ret.t),
-        }
-    }
-
-    fn generate_return(&mut self, ret: Return<'s>) {
-        if let Some(expr) = ret.expr {
-            self.generate_expression(expr, Location::Register(7));
-        }
-    
-        let instructions = self.instructions();
-    
-        instructions.push(insn::addi(6, 6, 3));    // free space for return address, base pointer, and return value
-        instructions.push(insn::str(7, 6, -1));    // store return value
-        instructions.push(insn::ldr(7, 6, -2));    // restore return address
-        instructions.push(insn::ldr(5, 6, -3));    // restore base pointer
-        instructions.push(insn::jmpr(7));          // return
-    }
-
-    fn generate_expression(&mut self, expression: Expression<'s>, location: Location) {
-        match expression.ty {
-            ExpressionType::Literal(literal) => self.generate_literal(literal, location),
-            ExpressionType::Binary(binary) => self.generate_binary(binary, location),
-        }
-    }
-
-    fn generate_binary(&mut self, binary: Binary<'s>, location: Location) {
-        let (dest, needs_move) = if let Location::Register(dest) = location {
-            (dest, false)
-        } else {
-            (self.take_available_register(None), true)
-        };
-        
-        self.generate_expression(*binary.left, Location::Register(dest));
-        let reg = self.take_available_register(Some(dest));
-        self.generate_expression(*binary.right, Location::Register(reg));
-        match binary.ty {
-            BinaryType::Add => self.instructions().push(insn::add(dest, dest, reg)),
-            BinaryType::Sub => self.instructions().push(insn::sub(dest, dest, reg)),
-            BinaryType::Mul => self.instructions().push(insn::mul(dest, dest, reg)),
-            BinaryType::Div => self.instructions().push(insn::div(dest, dest, reg)),
-            BinaryType::Mod => self.instructions().push(insn::mod_(dest, dest, reg)),
-        }
-        
-        if needs_move {
-            self.mov(location, Location::Register(dest));
-            self.return_available_register(dest);
-        }
-        
-        self.return_available_register(reg);
-    }
-
-    fn generate_literal(&mut self, literal: Literal<'s>, location: Location) {
-        match literal {
-            Literal::Numeric(n) => {
-                let (reg, needs_move) = if let Location::Register(reg) = location {
-                    (reg, false)
-                } else {
-                    (self.take_available_register(None), true)
-                };
-            
-                let instructions = self.instructions();
-                let num = *n;
-                instructions.push(insn::konst(reg, num));
-                if !crate::number_fits(num, true, 9) {
-                    instructions.push(insn::hiconst(reg, num >> 8));
-                }
-            
-                if needs_move {
-                    self.mov(location, Location::Register(reg));
-                    self.return_available_register(reg);
-                }
-            }
-        }
-    }
-
-    fn mov(&mut self, dst: Location, src: Location) {
-        use Location::*;
-    
-        match (dst, src) {
-            (Register(dst), Register(src)) => {
-                let instructions = self.instructions();
-                instructions.push(insn::addi(dst, src, 0));
-            }
-            _ => unreachable!("Unsupported locations dst: {:?} and src: {:?}", dst, src),
+    fn generate_top_level(&mut self, top_level: TopLevel<'s>) {
+        match top_level.ty {
+            TopLevelType::Procedure(procedure) => self.generate_procedure(procedure),
         }
     }
 }

@@ -896,6 +896,50 @@ mod insn {
         }
     }
 
+    pub fn and(rd: i8, rs: i8, rt: i8) -> InstructionWithLabel<'static> {
+        InstructionWithLabel {
+            ty: And,
+            rd,
+            rs,
+            rt,
+            immediate: -1,
+            label: None,
+        }
+    }
+
+    pub fn not(rd: i8, rs: i8) -> InstructionWithLabel<'static> {
+        InstructionWithLabel {
+            ty: Not,
+            rd,
+            rs,
+            rt: -1,
+            immediate: -1,
+            label: None,
+        }
+    }
+
+    pub fn xor(rd: i8, rs: i8, rt: i8) -> InstructionWithLabel<'static> {
+        InstructionWithLabel {
+            ty: Xor,
+            rd,
+            rs,
+            rt,
+            immediate: -1,
+            label: None,
+        }
+    }
+
+    pub fn or(rd: i8, rs: i8, rt: i8) -> InstructionWithLabel<'static> {
+        InstructionWithLabel {
+            ty: Or,
+            rd,
+            rs,
+            rt,
+            immediate: -1,
+            label: None,
+        }
+    }
+
     pub fn ldr(value: i8, addr: i8, offset: i32) -> InstructionWithLabel<'static> {
         InstructionWithLabel {
             ty: Ldr,

@@ -30,6 +30,10 @@ pub enum TokenType {
     Star,
     Slash,
     Percent,
+    Tilde,
+    Pipe,
+    Carrot,
+    Ampersand,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -143,6 +147,10 @@ impl<'a> Lexer<'a> {
                 '*' => self.single_char(TokenType::Star),
                 '/' => self.single_char(TokenType::Slash),
                 '%' => self.single_char(TokenType::Percent),
+                '~' => self.single_char(TokenType::Tilde),
+                '&' => self.single_char(TokenType::Ampersand),
+                '^' => self.single_char(TokenType::Carrot),
+                '|' => self.single_char(TokenType::Pipe),
                 c if is_decimal(c) => self.numeric_literal(),
                 c if is_identifier_start(c) => self.identifier(),
                 _ => {
@@ -189,7 +197,7 @@ fn is_not_token_delimeter(c: char) -> bool {
 }
 
 fn is_token_delimeter(c: char) -> bool {
-    is_whitespace(c) || c == '(' || c == ')' || c == '}' || c == '{' || c == ';' || c == '+' || c == '-' || c == '*' || c == '/' || c == '%'
+    is_whitespace(c) || c == '(' || c == ')' || c == '}' || c == '{' || c == ';' || c == '+' || c == '-' || c == '*' || c == '/' || c == '%' || c == '~' || c == '|' || c == '^' || c == '&'
 }
 
 fn keyword(s: &str) -> Option<TokenType> {

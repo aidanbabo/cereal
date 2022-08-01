@@ -13,25 +13,41 @@ pub enum Literal<'s> {
 }
 
 #[derive(Debug)]
+pub enum UnaryType {
+    Negate,
+    Plus,
+    BitNot,
+}
+
+#[derive(Debug)]
+pub struct Unary<'s> {
+    pub ty: S<'s, UnaryType>,
+    pub expr: Box<Expression<'s>>,
+}
+
+#[derive(Debug)]
 pub enum BinaryType {
     Add,
     Sub,
     Mul,
     Div,
     Mod,
+    BitAnd,
+    BitXor,
+    BitOr,
 }
 
 #[derive(Debug)]
 pub struct Binary<'s> {
     pub left: Box<Expression<'s>>,
-    pub ty: BinaryType,
+    pub ty: S<'s, BinaryType>,
     pub right: Box<Expression<'s>>,
 }
-
 
 #[derive(Debug)]
 pub enum ExpressionType<'s> {
     Literal(Literal<'s>),
+    Unary(Unary<'s>),
     Binary(Binary<'s>)
 }
 
@@ -76,11 +92,18 @@ pub struct TopLevel<'s> {
 
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
 enum Precedence {
-    None = 0,
-    Assignment = 1,
-    Term = 2,
-    Factor = 3,
-    Primary = 4
+    None,
+    Assignment,
+    BitOr,
+    BitXor,
+    BitAnd,
+    Equality,
+    Comparison,
+    Term,
+    Factor,
+    Unary,
+    Call,
+    Primary,
 }
 
 impl Precedence {
@@ -88,9 +111,16 @@ impl Precedence {
         use Precedence::*;
         match self {
             None => Assignment,
-            Assignment => Term,
+            Assignment => BitOr,
+            BitOr => BitXor,
+            BitXor => BitAnd,
+            BitAnd => Equality,
+            Equality => Comparison,
+            Comparison => Term,
             Term => Factor,
-            Factor => Primary,
+            Factor => Unary,
+            Unary => Call,
+            Call => Primary,
             Primary => unreachable!("Tried to get a super high precedence"),
         }
     }
@@ -114,13 +144,38 @@ impl<'s> Rule<'s> {
                 prefix: Some(Parser::numeric_literal),
                 infix: None,
             },
-            Plus | Minus => Rule {
+            Minus => Rule {
                 precedence: Precedence::Term,
-                prefix: None,
+                prefix: Some(Parser::unary),
+                infix: Some(Parser::binary),
+            },
+            Plus => Rule {
+                precedence: Precedence::Term,
+                prefix: Some(Parser::unary),
                 infix: Some(Parser::binary),
             },
             Star | Slash | Percent => Rule {
                 precedence: Precedence::Factor,
+                prefix: None,
+                infix: Some(Parser::binary),
+            },
+            Tilde => Rule {
+                precedence: Precedence::None,
+                prefix: Some(Parser::unary),
+                infix: None,
+            },
+            Pipe => Rule {
+                precedence: Precedence::BitOr,
+                prefix: None,
+                infix: Some(Parser::binary),
+            },
+            Carrot => Rule {
+                precedence: Precedence::BitXor,
+                prefix: None,
+                infix: Some(Parser::binary),
+            },
+            Ampersand => Rule {
+                precedence: Precedence::BitAnd,
                 prefix: None,
                 infix: Some(Parser::binary),
             },
@@ -196,9 +251,29 @@ impl<'s> Parser<'s> {
             return Err(format!("Expected numeric literal, found '{}'", num.chars));
         };
         let literal = Literal::Numeric(n.spanned(num.span));
-        let ty = ExpressionType::Literal(literal);
         let expr = Expression {
-            ty,
+            ty: ExpressionType::Literal(literal),
+            expr_ty: None,
+        };
+        
+        Ok(expr)
+    }
+    
+    fn unary(&mut self) -> Result<Expression<'s>, Error> {
+        let op = self.consume().unwrap();
+        let ty = match op.ty {
+            TokenType::Minus => UnaryType::Negate,
+            TokenType::Tilde => UnaryType::BitNot,
+            TokenType::Plus => UnaryType::Plus,
+            _ => unreachable!("Input to this function must be a unary op"),
+        };
+        let expr = self.expression()?;
+        let unary = Unary {
+            ty: ty.spanned(op.span),
+            expr: Box::new(expr), 
+        };
+        let expr = Expression {
+            ty: ExpressionType::Unary(unary),
             expr_ty: None,
         };
         
@@ -213,13 +288,16 @@ impl<'s> Parser<'s> {
             TokenType::Star => BinaryType::Mul,
             TokenType::Slash => BinaryType::Div,
             TokenType::Percent => BinaryType::Mod,
+            TokenType::Ampersand => BinaryType::BitAnd,
+            TokenType::Carrot => BinaryType::BitXor,
+            TokenType::Pipe => BinaryType::BitOr,
             _ => unreachable!("Input to this function must be binary op"),
         };
         let precedence = Rule::for_type(op.ty).precedence;
         let right = self.parse_precedence(precedence.higher())?;
         let binary = Binary {
             left: Box::new(left),
-            ty,
+            ty: ty.spanned(op.span),
             right: Box::new(right),
         };
         let expr = Expression {
@@ -231,22 +309,14 @@ impl<'s> Parser<'s> {
     }
     
     fn parse_precedence(&mut self, precedence: Precedence) -> Result<Expression<'s>, Error> {
-        let prefix = self.peek().map(|t| Rule::for_type(t.ty).prefix).flatten();
-        let prefix = if let Some(p) = prefix {
-            p
-        } else {
-            return Err("Expected expression".to_string());
+        let prefix = match self.peek().map(|t| Rule::for_type(t.ty).prefix).flatten() {
+            Some(p) => p,
+            None => return Err("Expected expression".to_string()),
         };
         
         let mut expr = prefix(self)?;
         
-        loop {
-            let infix = if let Some(i) = self.peek().map(|t| Rule::for_type(t.ty)) {
-                i
-            } else {
-                break;
-            };
-            
+        while let Some(infix) = self.peek().map(|t| Rule::for_type(t.ty)) {
             if precedence <= infix.precedence {
                 expr = infix.infix.unwrap()(self, expr)?;
             } else {
