@@ -23,6 +23,7 @@ pub enum TokenType {
     LeftBrace,
     RightBrace,
     Semicolon,
+    Comma,
     
     // Operators
     Plus,
@@ -140,6 +141,7 @@ impl<'a> Lexer<'a> {
                 '{' => self.single_char(TokenType::LeftBrace),
                 '}' => self.single_char(TokenType::RightBrace),
                 ';' => self.single_char(TokenType::Semicolon),
+                ',' => self.single_char(TokenType::Comma),
                 '+' => self.single_char(TokenType::Plus),
                 '-' => self.single_char(TokenType::Minus),
                 '*' => self.single_char(TokenType::Star),
@@ -197,7 +199,7 @@ fn is_not_token_delimeter(c: char) -> bool {
 
 fn is_token_delimeter(c: char) -> bool {
     is_whitespace(c) 
-        || c == '(' || c == ')' || c == '}' || c == '{' || c == ';' 
+        || c == '(' || c == ')' || c == '}' || c == '{' || c == ';' || c == ','
         || c == '+' || c == '-' || c == '*' || c == '/' || c == '%' 
         || c == '~' || c == '|' || c == '^' || c == '&' || c == '='
 }

@@ -57,12 +57,19 @@ pub struct Assignment<'s> {
 }
 
 #[derive(Debug)]
+pub struct Comma<'s> {
+    pub left: Box<Expression<'s>>,
+    pub right: Box<Expression<'s>>,
+}
+
+#[derive(Debug)]
 pub enum ExpressionType<'s> {
     Literal(Literal<'s>),
     Unary(Unary<'s>),
     Binary(Binary<'s>),
     Assignment(Assignment<'s>),
     Variable(&'s str),
+    Comma(Comma<'s>),
 }
 
 #[derive(Debug)]
@@ -115,6 +122,7 @@ pub struct TopLevel<'s> {
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
 enum Precedence {
     None,
+    Comma,
     Assignment,
     BitOr,
     BitXor,
@@ -133,7 +141,8 @@ impl Precedence {
     fn higher(self) -> Self {
         use Precedence::*;
         match self {
-            None => Assignment,
+            None => Comma,
+            Comma => Assignment,
             Assignment => BitOr,
             BitOr => BitXor,
             BitXor => BitAnd,
@@ -217,7 +226,11 @@ impl<'s> Rule<'s> {
                 prefix: Some(Parser::variable),
                 infix: None,
             },
-
+            Comma => Rule {
+                precedence: Precedence::Comma,
+                prefix: None,
+                infix: Some(Parser::comma),
+            },
             Return | Int | RightParen | LeftBrace | RightBrace | Semicolon => Rule {
                 precedence: Precedence::None,
                 prefix: None,
@@ -364,6 +377,20 @@ impl<'s> Parser<'s> {
         Ok(expr)
     }
     
+    fn comma(&mut self, left: Expression<'s>) -> Result<Expression<'s>, Error> {
+        let _comma = self.consume().unwrap();
+        let right = self.parse_precedence(Precedence::Assignment)?;
+        let comma = Comma {
+            left: Box::new(left),
+            right: Box::new(right),
+        };
+        let expr = Expression {
+            ty: ExpressionType::Comma(comma),
+            expr_ty: None,
+        };
+        Ok(expr)
+    }
+    
     fn parse_precedence(&mut self, precedence: Precedence) -> Result<Expression<'s>, Error> {
         let prefix = match self.peek().map(|t| Rule::for_type(t.ty).prefix).flatten() {
             Some(p) => p,
@@ -384,7 +411,7 @@ impl<'s> Parser<'s> {
     }
     
     fn expression(&mut self) -> Result<Expression<'s>, Error> {
-       self.parse_precedence(Precedence::Assignment)
+       self.parse_precedence(Precedence::Comma)
     }
     
     fn return_statement(&mut self, ret: S<'s, Token<'s>>) -> Result<S<'s, Return<'s>>, Error> {
@@ -435,10 +462,21 @@ impl<'s> Parser<'s> {
         };
         
         let mut names = Vec::new();
-        // @Bug @Todo commas
-        while let Some(name) = self.peek().and_then(|t| (t.ty == TokenType::Identifier).then_some(t.chars)) {
-            self.consume().unwrap();
-            names.push((0, name));
+        loop {
+            if let Some(name) = self.peek() {
+                if name.ty == TokenType::Identifier {
+                    let name = self.consume().unwrap();
+                    names.push((0, name.chars));
+
+                    if let Some(comma) = self.peek() {
+                        if comma.ty == TokenType::Comma {
+                            self.consume().unwrap();
+                            continue;
+                        }
+                    }
+                }
+            }
+            break;
         }
         
         if names.is_empty() {

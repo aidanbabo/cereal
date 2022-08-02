@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{Block, BlockType, InstructionWithLabel};
-use crate::c::parser::{TopLevel, TopLevelType, Procedure, Statement, StatementType, Return, Expression, ExpressionType, Literal, Unary, UnaryType, Binary, BinaryType, Assignment, AssignmentType};
+use crate::c::parser::{TopLevel, TopLevelType, Procedure, Statement, StatementType, Return, Expression, ExpressionType, Literal, Unary, UnaryType, Binary, BinaryType, Assignment, AssignmentType, Comma};
 use crate::insn;
 
 pub fn generate<'c, 's>(ast: Vec<TopLevel<'s>>, blocks: &'c mut Vec<Block<'s>>, constants: &'c mut HashMap<&'s str, i32>) {
@@ -166,16 +166,25 @@ impl<'c, 's> CgContext<'c, 's> {
     
     fn generate_assignment(&mut self, assignment: Assignment<'s>, location: Location) {
         let assign_to = self.generate_setter(*assignment.left);
-        let location = if let Location::Nowhere = location {
-            Location::Register(self.take_available_register(None))
+        let (location, needs_return) = if let Location::Nowhere = location {
+            (Location::Register(self.take_available_register(None)), true)
         } else {
-            location
+            (location, false)
         };
         self.generate_expression(*assignment.right, location);
         match *assignment.ty {
             AssignmentType::Regular => (),
         }
         self.mov(assign_to, location);
+        match location {
+            Location::Register(reg) if needs_return => self.return_available_register(reg),
+            _ => {},
+        }
+    }
+    
+    fn generate_comma(&mut self, comma: Comma<'s>, location: Location) {
+        self.generate_expression(*comma.left, Location::Nowhere);
+        self.generate_expression(*comma.right, location);
     }
 
     fn generate_expression(&mut self, expression: Expression<'s>, location: Location) {
@@ -191,6 +200,7 @@ impl<'c, 's> CgContext<'c, 's> {
             ExpressionType::Binary(binary) => self.generate_binary(binary, location),
             ExpressionType::Assignment(assignment) => self.generate_assignment(assignment, location),
             ExpressionType::Variable(_) => self.generate_getter(expression, location),
+            ExpressionType::Comma(comma) => self.generate_comma(comma, location)
         }
 
         if needs_move {
