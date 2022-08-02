@@ -2,6 +2,7 @@ use std::path::Path;
 use std::collections::HashMap;
 use crate::Block;
 
+mod ast;
 mod lexer;
 mod parser;
 mod cg;

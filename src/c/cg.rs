@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{Block, BlockType, InstructionWithLabel};
-use crate::c::parser::{TopLevel, TopLevelType, Procedure, Statement, StatementType, Return, Expression, ExpressionType, Literal, Unary, UnaryType, Binary, BinaryType, Assignment, AssignmentType, Comma};
+use crate::c::ast::*;
 use crate::insn;
 
 pub fn generate<'c, 's>(ast: Vec<TopLevel<'s>>, blocks: &'c mut Vec<Block<'s>>, constants: &'c mut HashMap<&'s str, i32>) {
