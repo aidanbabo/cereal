@@ -43,7 +43,7 @@ pub fn compile<'container, 'source>(
     let mut parser = Parser::new(tokens);
     let mut ast = Vec::new();
     match parser.fill(&mut ast) {
-        Ok(()) => {},// println!("{:#?}", ast),
+        Ok(()) => {},
         Err(error) => {
             println!("Errors in file {:?}", filename);
             println!("{}", error);

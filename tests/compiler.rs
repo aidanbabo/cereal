@@ -42,6 +42,12 @@ fn bit() {
     assert_eq!(result, 1);
 }
 
+#[test]
+fn stack_variable() {
+    let result = simple_compiler_test(&["data/c/stack_variable.c"], "data/tests/c/stack_variable.obj");
+    assert_eq!(result, 5);
+}
+
 fn simple_compiler_test(input: &[&str], output: &str) -> i16 {
     
     let mut inputs = Vec::new();

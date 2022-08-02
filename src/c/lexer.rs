@@ -34,6 +34,7 @@ pub enum TokenType {
     Pipe,
     Carrot,
     Ampersand,
+    Equals,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -124,10 +125,7 @@ impl<'a> Lexer<'a> {
             return Err(format!("Unexpected '{}' in identifier.", self.iter.peek().unwrap()));
         }
         
-        let ty = match keyword(chars) {
-            Some(keyword) => keyword,
-            None => TokenType::Identifier,
-        };
+        let ty = keyword(chars).unwrap_or(TokenType::Identifier);
         let token = Token { chars, ty };
         Ok(token.spanned(span))
     }
@@ -151,6 +149,7 @@ impl<'a> Lexer<'a> {
                 '&' => self.single_char(TokenType::Ampersand),
                 '^' => self.single_char(TokenType::Carrot),
                 '|' => self.single_char(TokenType::Pipe),
+                '=' => self.single_char(TokenType::Equals),
                 c if is_decimal(c) => self.numeric_literal(),
                 c if is_identifier_start(c) => self.identifier(),
                 _ => {
@@ -197,7 +196,10 @@ fn is_not_token_delimeter(c: char) -> bool {
 }
 
 fn is_token_delimeter(c: char) -> bool {
-    is_whitespace(c) || c == '(' || c == ')' || c == '}' || c == '{' || c == ';' || c == '+' || c == '-' || c == '*' || c == '/' || c == '%' || c == '~' || c == '|' || c == '^' || c == '&'
+    is_whitespace(c) 
+        || c == '(' || c == ')' || c == '}' || c == '{' || c == ';' 
+        || c == '+' || c == '-' || c == '*' || c == '/' || c == '%' 
+        || c == '~' || c == '|' || c == '^' || c == '&' || c == '='
 }
 
 fn keyword(s: &str) -> Option<TokenType> {

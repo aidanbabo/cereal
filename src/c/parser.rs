@@ -45,10 +45,24 @@ pub struct Binary<'s> {
 }
 
 #[derive(Debug)]
+pub enum AssignmentType {
+    Regular,
+}
+
+#[derive(Debug)]
+pub struct Assignment<'s> {
+    pub left: Box<Expression<'s>>,
+    pub ty: S<'s, AssignmentType>,
+    pub right: Box<Expression<'s>>,
+}
+
+#[derive(Debug)]
 pub enum ExpressionType<'s> {
     Literal(Literal<'s>),
     Unary(Unary<'s>),
-    Binary(Binary<'s>)
+    Binary(Binary<'s>),
+    Assignment(Assignment<'s>),
+    Variable(&'s str),
 }
 
 #[derive(Debug)]
@@ -65,6 +79,7 @@ pub struct Return<'s> {
 #[derive(Debug)]
 pub enum StatementType<'s> {
     Return(S<'s, Return<'s>>),
+    Expression(Expression<'s>),
 }
 
 #[derive(Debug)]
@@ -73,10 +88,17 @@ pub struct Statement<'s> {
 }
 
 #[derive(Debug)]
+pub struct Declaration<'s> {
+    pub ty: S<'s, Type>,
+    pub names: Vec<(usize, &'s str)>, // number of indirections and name
+}
+
+#[derive(Debug)]
 pub struct Procedure<'s> {
     pub args: Vec<S<'s, (Type, &'s str)>>,
     pub name: S<'s, &'s str>,
     pub return_type: Option<S<'s, Type>>,
+    pub declarations: Vec<Declaration<'s>>,
     pub body: Vec<Statement<'s>>,
 }
 
@@ -107,6 +129,7 @@ enum Precedence {
 }
 
 impl Precedence {
+    // Used for left associative operators (+, -, etc.)
     fn higher(self) -> Self {
         use Precedence::*;
         match self {
@@ -179,13 +202,23 @@ impl<'s> Rule<'s> {
                 prefix: None,
                 infix: Some(Parser::binary),
             },
+            Equals => Rule {
+                precedence: Precedence::Assignment,
+                prefix: None,
+                infix: Some(Parser::assignment),
+            },
             LeftParen => Rule {
                 precedence: Precedence::None,
                 prefix: Some(Parser::grouping),
                 infix: None,
             },
+            Identifier => Rule {
+                precedence: Precedence::None,
+                prefix: Some(Parser::variable),
+                infix: None,
+            },
 
-            Identifier | Return | Int | RightParen | LeftBrace | RightBrace | Semicolon => Rule {
+            Return | Int | RightParen | LeftBrace | RightBrace | Semicolon => Rule {
                 precedence: Precedence::None,
                 prefix: None,
                 infix: None,
@@ -259,6 +292,14 @@ impl<'s> Parser<'s> {
         Ok(expr)
     }
     
+    fn variable(&mut self) -> Result<Expression<'s>, Error> {
+        let expr = Expression {
+            ty: ExpressionType::Variable(self.consume().unwrap().chars),
+            expr_ty: None,
+        };
+        Ok(expr)
+    }
+    
     fn unary(&mut self) -> Result<Expression<'s>, Error> {
         let op = self.consume().unwrap();
         let ty = match op.ty {
@@ -307,6 +348,21 @@ impl<'s> Parser<'s> {
 
         Ok(expr)
     }
+
+    fn assignment(&mut self, left: Expression<'s>) -> Result<Expression<'s>, Error> {
+        let equals = self.consume().unwrap();
+        let right = self.parse_precedence(Precedence::Assignment)?;
+        let assignment = Assignment {
+            left: Box::new(left),
+            ty: AssignmentType::Regular.spanned(equals.span),
+            right: Box::new(right),
+        };
+        let expr = Expression {
+            ty: ExpressionType::Assignment(assignment),
+            expr_ty: None,
+        };
+        Ok(expr)
+    }
     
     fn parse_precedence(&mut self, precedence: Precedence) -> Result<Expression<'s>, Error> {
         let prefix = match self.peek().map(|t| Rule::for_type(t.ty).prefix).flatten() {
@@ -348,32 +404,75 @@ impl<'s> Parser<'s> {
         Ok(return_.spanned(ret.span))
     }
     
-    fn statement(&mut self) -> Option<Result<Statement<'s>, Error>> {
-        let ret = self.peek()?;
-        let stmt_ty: StatementType<'s> = match ret.ty {
+    fn statement(&mut self) -> Result<Statement<'s>, Error> {
+        let ret = self.peek().expect("Not the last token, expected to parse a statement");
+        let stmt_ty = match ret.ty {
             TokenType::Return => {
                 let ret = self.consume().unwrap();
-                let ret = match self.return_statement(ret) {
-                    Ok(r) => r,
-                    Err(e) => return Some(Err(e)),
-                };
+                let ret = self.return_statement(ret)?;
                 StatementType::Return(ret)
+            }
+            _ => {
+                let expr = self.expression()?;
+                self.next_token_expected_of_type("';'", TokenType::Semicolon)?;
+                StatementType::Expression(expr)
+            },
+        };
+        
+        Ok(Statement {
+            ty: stmt_ty,
+        })
+    }
+
+    fn declaration(&mut self) -> Option<Result<Declaration<'s>, Error>> {
+        let next = self.peek()?;
+        let ty = match next.ty {
+            TokenType::Int => {
+                let ty = self.consume().unwrap();
+                Type::Int.spanned(ty.span)
             }
             _ => return None,
         };
         
-        Some(Ok(Statement {
-            ty: stmt_ty,
+        let mut names = Vec::new();
+        // @Bug @Todo commas
+        while let Some(name) = self.peek().and_then(|t| (t.ty == TokenType::Identifier).then_some(t.chars)) {
+            self.consume().unwrap();
+            names.push((0, name));
+        }
+        
+        if names.is_empty() {
+            return Some(Err("Expected identifiers in variable declaration.".to_string()));
+        }
+        
+        if let Err(e) = self.next_token_expected_of_type("';'", TokenType::Semicolon) {
+            return Some(Err(e));
+        }
+        
+        Some(Ok(Declaration {
+            ty,
+            names,
         }))
     }
     
     fn procedure(&mut self, ty: S<'s, Token<'s>>, name: S<'s, Token<'s>>, _left_paren: S<'s, Token<'s>>) -> Result<Procedure<'s>, Error> {
         self.next_token_expected_of_type("')'", TokenType::RightParen)?;
         self.next_token_expected_of_type("'{'", TokenType::LeftBrace)?;
+
+        let mut decls = Vec::new();
+        while let Some(decl) = self.declaration() {
+            let decl = decl?;
+            decls.push(decl);
+        }
         
         let mut stmts = Vec::new();
-        while let Some(stmt) = self.statement() {
-            let stmt = stmt?;
+        loop {
+            if let Some(t) = self.peek() {
+                if t.ty == TokenType::RightBrace {
+                    break;
+                }
+            }
+            let stmt = self.statement()?;
             stmts.push(stmt);
         }
 
@@ -388,6 +487,7 @@ impl<'s> Parser<'s> {
             args: Vec::new(),
             name: name.chars.spanned(name.span),
             return_type: Some(return_type.spanned(ty.span)),
+            declarations: decls,
             body: stmts,
         })
     }
