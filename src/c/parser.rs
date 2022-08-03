@@ -334,23 +334,14 @@ impl<'s> Parser<'s> {
             ty: stmt_ty,
         })
     }
-
-    fn declaration(&mut self) -> Option<Result<Declaration<'s>, Error>> {
-        let next = self.peek()?;
-        let ty = match next.ty {
-            TokenType::Int => {
-                let ty = self.consume().unwrap();
-                Type::Int.spanned(ty.span)
-            }
-            _ => return None,
-        };
-        
+    
+    fn get_names(&mut self) -> Result<Vec<(usize, S<'s, &'s str>)>, Error> {
         let mut names = Vec::new();
         loop {
             if let Some(name) = self.peek() {
                 if name.ty == TokenType::Identifier {
                     let name = self.consume().unwrap();
-                    names.push((0, name.chars));
+                    names.push((0, name.chars.spanned(name.span)));
 
                     if let Some(comma) = self.peek() {
                         if comma.ty == TokenType::Comma {
@@ -364,12 +355,30 @@ impl<'s> Parser<'s> {
         }
         
         if names.is_empty() {
-            return Some(Err("Expected identifiers in variable declaration.".to_string()));
+            return Err("Expected identifiers in variable declaration.".to_string());
         }
         
         if let Err(e) = self.next_token_expected_of_type("';'", TokenType::Semicolon) {
-            return Some(Err(e));
+            return Err(e);
         }
+        
+        Ok(names)
+    }
+
+    fn declaration(&mut self) -> Option<Result<Declaration<'s>, Error>> {
+        let next = self.peek()?;
+        let ty = match next.ty {
+            TokenType::Int => {
+                let ty = self.consume().unwrap();
+                Type::Int.spanned(ty.span)
+            }
+            _ => return None,
+        };
+        
+        let names = match self.get_names() {
+            Ok(n) => n,
+            Err(e) => return Some(Err(e)),
+        };
         
         Some(Ok(Declaration {
             ty,
@@ -377,7 +386,8 @@ impl<'s> Parser<'s> {
         }))
     }
     
-    fn procedure(&mut self, ty: S<'s, Token<'s>>, name: S<'s, Token<'s>>, _left_paren: S<'s, Token<'s>>) -> Result<Procedure<'s>, Error> {
+    fn procedure(&mut self, ty: S<'s, Token<'s>>, name: S<'s, Token<'s>>) -> Result<Procedure<'s>, Error> {
+        self.next_token_expected_of_type("'('", TokenType::LeftParen)?;
         self.next_token_expected_of_type("')'", TokenType::RightParen)?;
         self.next_token_expected_of_type("'{'", TokenType::LeftBrace)?;
 
@@ -414,11 +424,35 @@ impl<'s> Parser<'s> {
         })
     }
     
+    fn global_variable(&mut self, ty: S<'s, Token<'s>>, first: S<'s, Token<'s>>) -> Result<GlobalVariable<'s>, Error> {
+        let mut names = if self.peek().unwrap().ty == TokenType::Comma {
+            self.consume();
+            self.get_names()?
+        } else {
+            Vec::new()
+        };
+        names.insert(0, (0, first.chars.spanned(first.span)));
+        
+        let ast_ty = match ty.ty {
+            TokenType::Int => Type::Int,
+            _ => return Err(format!("'int' is the only allowed type.")),
+        };
+        
+        Ok(GlobalVariable {
+            ty: ast_ty.spanned(ty.span),
+            names,
+        })
+    }
+    
     fn top_level_decl(&mut self, ty: S<'s, Token<'s>>) -> Result<TopLevel<'s>, Error> {
         let identifier = self.next_token_expected_of_type("an identifier", TokenType::Identifier)?;
-        let third = self.next_token_expected_of_type("'('", TokenType::LeftParen)?;
         
-        let top_level_ty = TopLevelType::Procedure(self.procedure(ty, identifier, third)?);
+        let top_level_ty = match self.peek() {
+            Some(t) if t.ty == TokenType::Semicolon || t.ty == TokenType::Comma => TopLevelType::Variable(self.global_variable(ty, identifier)?),
+            Some(t) if t.ty == TokenType::LeftParen => TopLevelType::Procedure(self.procedure(ty, identifier)?),
+            Some(t) => return Err(format!("Expected either '(' or ';', found '{}'", t.chars)),
+            None => return Err(format!("Expected either '(' or ';', found nothing.")),
+        };
         
         Ok(TopLevel { ty: top_level_ty })
     }

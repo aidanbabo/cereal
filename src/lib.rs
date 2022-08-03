@@ -994,5 +994,16 @@ mod insn {
             label: None,
         }
     }
+
+    pub fn lea<'s>(reg: i8, label: &'s str) -> InstructionWithLabel<'s> {
+        InstructionWithLabel {
+            ty: Lea,
+            rd: reg,
+            rs: -1,
+            rt: -1,
+            immediate: -1,
+            label: Some(label),
+        }
+    }
 }
 

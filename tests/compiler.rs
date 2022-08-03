@@ -48,6 +48,12 @@ fn stack_variable() {
     assert_eq!(result, 5);
 }
 
+#[test]
+fn global_variable() {
+    let result = simple_compiler_test(&["data/c/global_variable.c"], "data/tests/c/global_variable.obj");
+    assert_eq!(result, 5);
+}
+
 fn simple_compiler_test(input: &[&str], output: &str) -> i16 {
     
     let mut inputs = Vec::new();

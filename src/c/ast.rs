@@ -95,7 +95,7 @@ pub struct Statement<'s> {
 #[derive(Debug)]
 pub struct Declaration<'s> {
     pub ty: S<'s, Type>,
-    pub names: Vec<(usize, &'s str)>, // number of indirections and name
+    pub names: Vec<(usize, S<'s, &'s str>)>, // number of indirections and name
 }
 
 #[derive(Debug)]
@@ -108,8 +108,15 @@ pub struct Procedure<'s> {
 }
 
 #[derive(Debug)]
+pub struct GlobalVariable<'s> {
+    pub ty: S<'s, Type>,
+    pub names: Vec<(usize, S<'s, &'s str>)>,
+}
+
+#[derive(Debug)]
 pub enum TopLevelType<'s> {
     Procedure(Procedure<'s>),
+    Variable(GlobalVariable<'s>)
 }
 
 #[derive(Debug)]
