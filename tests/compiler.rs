@@ -1,60 +1,30 @@
 use cereal::simulator::{run, Options};
 
-#[test]
-fn nice() {
-    let result = simple_compiler_test(&["data/c/nice.c"], "data/tests/c/nice.obj");
-    assert_eq!(result, 69);
+macro_rules! simple_compiler_test {
+    ( $( $name:ident $result:expr,)* ) => {
+        $(
+            #[test]
+            fn $name() {
+                let input = concat!("data/c/", stringify!($name), ".c");
+                let output = concat!("data/tests/c/", stringify!($name), ".obj");
+                let result = _simple_compiler_test(&[input], output);
+                assert_eq!(result, $result);
+            }
+        )*
+    }
 }
 
-#[test]
-fn precedence() {
-    let result = simple_compiler_test(&["data/c/precedence.c"], "data/tests/c/precedence.obj");
-    assert_eq!(result, 30);
+simple_compiler_test! {
+    nice 69, 
+    precedence 30, precedence2 30,
+    grouping 50, grouping2 50,
+    negation -10,
+    bit 1,
+    stack_variable 5,
+    global_variable 5,
 }
 
-#[test]
-fn precedence2() {
-    let result = simple_compiler_test(&["data/c/precedence2.c"], "data/tests/c/precedence2.obj");
-    assert_eq!(result, 30);
-}
-
-#[test]
-fn grouping() {
-    let result = simple_compiler_test(&["data/c/grouping.c"], "data/tests/c/grouping.obj");
-    assert_eq!(result, 50);
-}
-
-#[test]
-fn grouping2() {
-    let result = simple_compiler_test(&["data/c/grouping2.c"], "data/tests/c/grouping2.obj");
-    assert_eq!(result, 50);
-}
-
-#[test]
-fn negation() {
-    let result = simple_compiler_test(&["data/c/negation.c"], "data/tests/c/negation.obj");
-    assert_eq!(result, -10);
-}
-
-#[test]
-fn bit() {
-    let result = simple_compiler_test(&["data/c/bit.c"], "data/tests/c/bit.obj");
-    assert_eq!(result, 1);
-}
-
-#[test]
-fn stack_variable() {
-    let result = simple_compiler_test(&["data/c/stack_variable.c"], "data/tests/c/stack_variable.obj");
-    assert_eq!(result, 5);
-}
-
-#[test]
-fn global_variable() {
-    let result = simple_compiler_test(&["data/c/global_variable.c"], "data/tests/c/global_variable.obj");
-    assert_eq!(result, 5);
-}
-
-fn simple_compiler_test(input: &[&str], output: &str) -> i16 {
+fn _simple_compiler_test(input: &[&str], output: &str) -> i16 {
     
     let mut inputs = Vec::new();
     inputs.push("data/c/simple_libc.asm".into());
