@@ -15,7 +15,8 @@ pub fn generate<'c, 's>(ast: Vec<TopLevel<'s>>, blocks: &'c mut Vec<Block<'s>>, 
 enum Location<'s> {
     Nowhere,
     Register(i8),
-    Stack(i32),
+    OffsetFrame(i32),
+    OffsetStack(i32),
     Label(&'s str),
 }
 
@@ -128,7 +129,8 @@ impl<'c, 's> CgContext<'c, 's> {
         match src {
             Nowhere => panic!(),
             Register(_) => {},
-            Stack(offset) => self.instructions().push(insn::ldr(reg, 5, offset)),
+            OffsetFrame(offset) => self.instructions().push(insn::ldr(reg, 5, offset)),
+            OffsetStack(offset) => self.instructions().push(insn::ldr(reg, 6, offset)),
             Label(label) => {
                 let addr = self.take_available_register(Some(reg));
                 self.instructions().push(insn::lea(addr, label));
@@ -141,7 +143,8 @@ impl<'c, 's> CgContext<'c, 's> {
         match dst {
             Nowhere => panic!(),
             Register(_) => {},
-            Stack(offset) => self.instructions().push(insn::str(reg, 5, offset)),
+            OffsetFrame(offset) => self.instructions().push(insn::str(reg, 5, offset)),
+            OffsetStack(offset) => self.instructions().push(insn::str(reg, 6, offset)),
             Label(label) => {
                 let addr = self.take_available_register(Some(reg));
                 self.instructions().push(insn::lea(addr, label));
@@ -261,12 +264,25 @@ impl<'c, 's> CgContext<'c, 's> {
         self.generate_expression(*comma.left, Location::Nowhere);
         self.generate_expression(*comma.right, location);
     }
+    
+    fn generate_call(&mut self, call: Call<'s>, location: Location<'s>) {
+        let proc = if let ExpressionType::Variable(v) = call.procedure.ty {
+            v
+        } else {
+            panic!("Only supporting named procedure calls.");
+        };
+        
+        assert!(call.args.is_empty(), "Only working with nullary procedures.");
+        
+        self.instructions().push(insn::jsr(proc));
+        self.mov(location, Location::OffsetStack(-1));
+    }
 
     fn generate_expression(&mut self, expression: Expression<'s>, location: Location<'s>) {
         let (dest, needs_move) = match location {
             Location::Nowhere => (-1, false),
             Location::Register(dest) => (dest, false),
-            Location::Stack(_) | Location::Label(_) => (self.take_available_register(None), true),
+            Location::OffsetFrame(_) | Location::OffsetStack(_) | Location::Label(_) => (self.take_available_register(None), true),
         };
         
         match expression.ty {
@@ -275,7 +291,8 @@ impl<'c, 's> CgContext<'c, 's> {
             ExpressionType::Binary(binary) => self.generate_binary(binary, location),
             ExpressionType::Assignment(assignment) => self.generate_assignment(assignment, location),
             ExpressionType::Variable(_) => self.generate_getter(expression, location),
-            ExpressionType::Comma(comma) => self.generate_comma(comma, location)
+            ExpressionType::Comma(comma) => self.generate_comma(comma, location),
+            ExpressionType::Call(call) => self.generate_call(call, location),
         }
 
         if needs_move {
@@ -318,7 +335,7 @@ impl<'c, 's> CgContext<'c, 's> {
         let mut stack_index = -1;
         for decl in procedure.declarations {
             for (_, name) in decl.names {
-                self.locals.insert(*name, Location::Stack(stack_index));
+                self.locals.insert(*name, Location::OffsetFrame(stack_index));
                 stack_index -= 1;
             }
         }
@@ -342,6 +359,7 @@ impl<'c, 's> CgContext<'c, 's> {
             labels: vec![*procedure.name],
             ty: BlockType::Code(instructions),
         };
+        self.globals.insert(*procedure.name, Location::Label(*procedure.name));
     
         self.blocks.push(block);
     

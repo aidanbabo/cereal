@@ -984,6 +984,17 @@ mod insn {
         }
     }
 
+    pub fn jsr<'s>(dest: &'s str) -> InstructionWithLabel<'s> {
+        InstructionWithLabel {
+            ty: Jsr,
+            rd: -1,
+            rs: -1,
+            rt: -1,
+            immediate: -1,
+            label: Some(dest),
+        }
+    }
+
     pub fn jmpr(dest: i8) -> InstructionWithLabel<'static> {
         InstructionWithLabel {
             ty: Jmpr,

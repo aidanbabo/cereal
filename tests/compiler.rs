@@ -22,6 +22,7 @@ simple_compiler_test! {
     bit 1,
     stack_variable 5,
     global_variable 5,
+    procedure_call 5,
 }
 
 fn _simple_compiler_test(input: &[&str], output: &str) -> i16 {

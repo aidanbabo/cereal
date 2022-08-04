@@ -101,9 +101,9 @@ impl<'s> Rule<'s> {
                 infix: Some(Parser::assignment),
             },
             LeftParen => Rule {
-                precedence: Precedence::None,
+                precedence: Precedence::Call,
                 prefix: Some(Parser::grouping),
-                infix: None,
+                infix: Some(Parser::call),
             },
             Identifier => Rule {
                 precedence: Precedence::None,
@@ -159,7 +159,7 @@ impl<'s> Parser<'s> {
             if ty == token.ty {
                 Ok(token)
             } else {
-                Err(format!("Expected {}, found '{}'", expected, token.chars))
+                Err(format!("(line: {}) Expected {}, found '{}'.", token.span.line, expected, token.chars))
             }
         })
     }
@@ -270,6 +270,21 @@ impl<'s> Parser<'s> {
         };
         let expr = Expression {
             ty: ExpressionType::Comma(comma),
+            expr_ty: None,
+        };
+        Ok(expr)
+    }
+    
+    fn call(&mut self, procedure: Expression<'s>) -> Result<Expression<'s>, Error> {
+        assert_eq!(self.consume().unwrap().ty, TokenType::LeftParen);
+        self.next_token_expected_of_type("')'", TokenType::RightParen)?;
+        
+        let call = Call {
+            procedure: Box::new(procedure),
+            args: Vec::new(),
+        };
+        let expr = Expression {
+            ty: ExpressionType::Call(call),
             expr_ty: None,
         };
         Ok(expr)
@@ -429,6 +444,7 @@ impl<'s> Parser<'s> {
             self.consume();
             self.get_names()?
         } else {
+            self.next_token_expected_of_type("';'", TokenType::Semicolon)?;
             Vec::new()
         };
         names.insert(0, (0, first.chars.spanned(first.span)));
@@ -457,17 +473,14 @@ impl<'s> Parser<'s> {
         Ok(TopLevel { ty: top_level_ty })
     }
     
-    fn top_level(&mut self) -> Option<Result<TopLevel<'s>, Error>> {
-        let first = self.consume()?;
-        let res = match first.ty {
-            TokenType::Int => self.top_level_decl(first),
-            _ => Err(format!("Expected 'int', found '{}'", first.chars)),
-        };
-        Some(res)
+    fn top_level(&mut self) -> Result<TopLevel<'s>, Error> {
+        let int = self.next_token_expected_of_type("'int'", TokenType::Int)?;
+        self.top_level_decl(int)
     }
 
     pub fn fill(&mut self, top_levels: &mut Vec<TopLevel<'s>>) -> Result<(), Error> {
-        while let Some(top_level) = self.top_level().transpose()? {
+        while self.peek().is_some() {
+            let top_level = self.top_level()?;
             top_levels.push(top_level);
         }
         Ok(())

@@ -61,6 +61,12 @@ pub struct Comma<'s> {
 }
 
 #[derive(Debug)]
+pub struct Call<'s> {
+    pub procedure: Box<Expression<'s>>,
+    pub args: Vec<Expression<'s>>,
+}
+
+#[derive(Debug)]
 pub enum ExpressionType<'s> {
     Literal(Literal<'s>),
     Unary(Unary<'s>),
@@ -68,6 +74,7 @@ pub enum ExpressionType<'s> {
     Assignment(Assignment<'s>),
     Variable(&'s str),
     Comma(Comma<'s>),
+    Call(Call<'s>),
 }
 
 #[derive(Debug)]
