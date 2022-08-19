@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::io::{self, Write};
 
-use super::Machine;
 use super::decode::{decode, InvalidInstructionError};
+use super::Machine;
 
 // @Todo complete
 fn print_instruction(word: u16, trace: &mut dyn Write) -> io::Result<()> {
-    let instruction = decode(word, None);
+    let instruction = decode(word, &mut None);
     match instruction {
         Ok(instruction) => writeln!(trace, "\t{}", instruction)?,
         Err(InvalidInstructionError) => writeln!(trace, "\tInvalid Instruction")?,
@@ -35,7 +35,7 @@ enum LoadErrorKind {
 }
 
 struct Reader<'a> {
-    bytes: &'a[u8],
+    bytes: &'a [u8],
     cursor: usize,
     section_byte: usize,
 }
@@ -45,7 +45,10 @@ impl<'a> Reader<'a> {
         let nbytes = nbytes as usize;
         if self.bytes.len() - self.cursor < nbytes {
             return Err(LoadError {
-                kind: LoadErrorKind::Eof { expected_bytes: nbytes, actual_bytes_remaining: self.bytes.len() - self.cursor },
+                kind: LoadErrorKind::Eof {
+                    expected_bytes: nbytes,
+                    actual_bytes_remaining: self.bytes.len() - self.cursor,
+                },
                 in_section_at_byte: self.section_byte,
             });
         }
@@ -61,7 +64,10 @@ impl<'a> Reader<'a> {
     fn read_word(&mut self) -> Result<u16, LoadError> {
         if self.bytes.len() - self.cursor < 2 {
             return Err(LoadError {
-                kind: LoadErrorKind::Eof { expected_bytes: 2, actual_bytes_remaining: self.bytes.len() - self.cursor },
+                kind: LoadErrorKind::Eof {
+                    expected_bytes: 2,
+                    actual_bytes_remaining: self.bytes.len() - self.cursor,
+                },
                 in_section_at_byte: self.section_byte,
             });
         }
@@ -75,9 +81,13 @@ impl<'a> Reader<'a> {
 
 // @Todo check code and data addresses
 // @Todo proper bounds checking errors
-pub(super) fn load(bytes: &[u8], machine: &mut Machine, mut trace: Option<&mut dyn Write>) -> Result<(), LoadError> {
-    use crate::{CODE_HEADER, DATA_HEADER, SYMBOL_HEADER, FILE_HEADER, LINE_HEADER};
-    
+pub(super) fn load(
+    bytes: &[u8],
+    machine: &mut Machine,
+    mut trace: Option<&mut dyn Write>,
+) -> Result<(), LoadError> {
+    use crate::{CODE_HEADER, DATA_HEADER, FILE_HEADER, LINE_HEADER, SYMBOL_HEADER};
+
     let mut reader = Reader {
         bytes,
         cursor: 0,
@@ -86,9 +96,9 @@ pub(super) fn load(bytes: &[u8], machine: &mut Machine, mut trace: Option<&mut d
 
     let mut label_addresses = HashMap::new();
     let mut file_names = Vec::new();
-    
+
     let bytes = &mut &*bytes;
-    while bytes.len() > 0 {
+    while !bytes.is_empty() {
         let word = if let Ok(word) = reader.read_word() {
             word
         } else {
@@ -115,20 +125,20 @@ pub(super) fn load(bytes: &[u8], machine: &mut Machine, mut trace: Option<&mut d
                         let _ = print_instruction(word, trace);
                     }
                 }
-            } 
+            }
             DATA_HEADER => {
                 let addr = reader.read_word()?;
                 let nwords = reader.read_word()?;
-                
+
                 if let Some(trace) = trace.as_deref_mut() {
                     let _ = writeln!(trace, ".data");
                     let _ = writeln!(trace, ".addr {:x}", addr);
-                
+
                     for label in label_addresses.get(&addr).unwrap_or(&Vec::new()) {
                         let _ = writeln!(trace, "{}:", label);
                     }
                 }
-                
+
                 for i in 0..nwords {
                     let word = reader.read_word()?;
                     machine.memory[(addr + i) as usize] = word;
@@ -136,30 +146,42 @@ pub(super) fn load(bytes: &[u8], machine: &mut Machine, mut trace: Option<&mut d
                         let _ = writeln!(trace, ".fill {}", word);
                     }
                 }
-            } 
+            }
             SYMBOL_HEADER => {
                 let addr = reader.read_word()?;
                 let nbytes = reader.read_word()?;
                 let symbol_name = reader.read_str(nbytes)?;
                 // label addresses are only used for printing
                 if trace.is_some() {
-                    label_addresses.entry(addr).or_insert(Vec::new()).push(symbol_name);
+                    label_addresses
+                        .entry(addr)
+                        .or_insert(Vec::new())
+                        .push(symbol_name);
                 }
-            } 
+            }
             FILE_HEADER => {
                 let nbytes = reader.read_word()?;
                 let file_name = reader.read_str(nbytes)?;
                 file_names.push(file_name);
                 if let Some(trace) = trace.as_deref_mut() {
-                    let _ = writeln!(trace, "; File index ({}) file: {}", file_names.len() - 1, file_name);
+                    let _ = writeln!(
+                        trace,
+                        "; File index ({}) file: {}",
+                        file_names.len() - 1,
+                        file_name
+                    );
                 }
-            } 
+            }
             LINE_HEADER => {
                 let addr = reader.read_word()?;
                 let line = reader.read_word()?;
                 let file_index = reader.read_word()?;
                 if let Some(trace) = trace.as_deref_mut() {
-                    let _ = writeln!(trace, "; Line number at address: {:x} for line {} in file index {}", addr, line, file_index);
+                    let _ = writeln!(
+                        trace,
+                        "; Line number at address: {:x} for line {} in file index {}",
+                        addr, line, file_index
+                    );
                 }
             }
             _ => {
@@ -173,6 +195,6 @@ pub(super) fn load(bytes: &[u8], machine: &mut Machine, mut trace: Option<&mut d
             }
         }
     }
-    
+
     Ok(())
 }

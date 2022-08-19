@@ -15,16 +15,16 @@ struct Args {
 
 fn main() {
     let args = <Args as clap::Parser>::parse();
-    
+
     if args.input_paths.is_empty() {
         return;
     }
-    
+
     let options = cereal::Options {
         output_path: args.output_path,
         debug_info: args.debug_info,
         input_paths: args.input_paths,
     };
-    
+
     cereal::compile(options).expect("No compile fail");
 }

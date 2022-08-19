@@ -15,7 +15,7 @@ macro_rules! simple_compiler_test {
 }
 
 simple_compiler_test! {
-    nice 69, 
+    nice 69,
     precedence 30, precedence2 30,
     grouping 50, grouping2 50,
     negation -10,
@@ -26,20 +26,19 @@ simple_compiler_test! {
 }
 
 fn _simple_compiler_test(input: &[&str], output: &str) -> i16 {
-    
     let mut inputs = Vec::new();
     inputs.push("data/c/simple_libc.asm".into());
     for input in input {
         inputs.push(input.into())
     }
     inputs.push("data/c/simple_os.asm".into());
-    
+
     let options = cereal::Options {
         output_path: output.into(),
         debug_info: false,
         input_paths: inputs,
     };
-    
+
     cereal::compile(options).expect("Compilation success");
 
     let options = Options {
@@ -48,7 +47,6 @@ fn _simple_compiler_test(input: &[&str], output: &str) -> i16 {
         step_cap: None,
         loader_trace: false,
     };
-    
+
     run(options)
 }
-

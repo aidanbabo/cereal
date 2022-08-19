@@ -27,12 +27,15 @@ fn wireframe() {
 }
 
 fn asm_trace_test(names: &[&str]) {
-    let input_file_names: Vec<PathBuf> = names.iter().map(|name| {
-        let mut full = String::from("data/asm/");
-        full.push_str(name);
-        full.push_str(".obj");
-        full.into()
-    }).collect();
+    let input_file_names: Vec<PathBuf> = names
+        .iter()
+        .map(|name| {
+            let mut full = String::from("data/asm/");
+            full.push_str(name);
+            full.push_str(".obj");
+            full.into()
+        })
+        .collect();
 
     let mut input_file_name = String::from("data/asm/");
     let mut output_file_name = String::from("data/tests/asm/");
@@ -42,7 +45,7 @@ fn asm_trace_test(names: &[&str]) {
     input_file_name.push_str(".obj");
     output_file_name.push_str(".txt");
     test_data.push_str(".txt");
-    
+
     let expected = std::fs::read_to_string(test_data).expect("Cannot find test data");
     let options = Options {
         trace_path: Some(output_file_name.clone().into()),
@@ -50,11 +53,11 @@ fn asm_trace_test(names: &[&str]) {
         step_cap: Some(expected.lines().count() as u64),
         loader_trace: false,
     };
-    
+
     run(options);
-    
+
     let actual = std::fs::read_to_string(output_file_name).expect("Cannot open output file");
-    
+
     compare_by_lines(&actual, &expected);
 }
 
@@ -69,7 +72,7 @@ fn compare_by_lines(actual: &str, expected: &str) {
                 assert_eq!(actual, expected, "Mismatch on line {}", line);
             }
         });
-    
+
     if actual.len() != expected.len() {
         panic!("The files are of different lengths");
     }

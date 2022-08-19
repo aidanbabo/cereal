@@ -1,7 +1,7 @@
-use crate::{S, Spannable};
-use crate::c::lexer::{Token, TokenType};
 use crate::c::ast::*;
+use crate::c::lexer::{Token, TokenType};
 use crate::c::Error;
+use crate::{Spannable, S};
 
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
 enum Precedence {
@@ -124,7 +124,6 @@ impl<'s> Rule<'s> {
     }
 }
 
-
 pub struct Parser<'s> {
     tokens: Vec<S<'s, Token<'s>>>,
     next_token: usize,
@@ -139,41 +138,49 @@ impl<'s> Parser<'s> {
             _peek_token: None,
         }
     }
-    
+
     fn peek(&mut self) -> Option<&S<'s, Token<'s>>> {
         self.tokens.get(self.next_token)
     }
-    
+
     fn consume(&mut self) -> Option<S<'s, Token<'s>>> {
         let token = self.tokens.get(self.next_token).copied();
         self.next_token += 1;
         token
     }
-    
+
     fn next_token_expected(&mut self, expected: &str) -> Result<S<'s, Token<'s>>, Error> {
-        self.consume().ok_or_else(|| format!("Expected {}, found end of file.", expected))
+        self.consume()
+            .ok_or_else(|| format!("Expected {}, found end of file.", expected))
     }
-    
-    fn next_token_expected_of_type(&mut self, expected: &str, ty: TokenType) -> Result<S<'s, Token<'s>>, Error> {
+
+    fn next_token_expected_of_type(
+        &mut self,
+        expected: &str,
+        ty: TokenType,
+    ) -> Result<S<'s, Token<'s>>, Error> {
         self.next_token_expected(expected).and_then(|token| {
             if ty == token.ty {
                 Ok(token)
             } else {
-                Err(format!("(line: {}) Expected {}, found '{}'.", token.span.line, expected, token.chars))
+                Err(format!(
+                    "(line: {}) Expected {}, found '{}'.",
+                    token.span.line, expected, token.chars
+                ))
             }
         })
     }
-    
+
     fn grouping(&mut self) -> Result<Expression<'s>, Error> {
         self.consume();
         let expr = self.expression()?;
         self.next_token_expected_of_type("')'", TokenType::RightParen)?;
         Ok(expr)
     }
-    
+
     fn numeric_literal(&mut self) -> Result<Expression<'s>, Error> {
         use crate::c::lexer;
-        
+
         let num = self.next_token_expected("numeric literal")?;
         let n = if let TokenType::Literal(lexer::Literal::Numeric(n)) = num.ty {
             n
@@ -185,10 +192,10 @@ impl<'s> Parser<'s> {
             ty: ExpressionType::Literal(literal),
             expr_ty: None,
         };
-        
+
         Ok(expr)
     }
-    
+
     fn variable(&mut self) -> Result<Expression<'s>, Error> {
         let expr = Expression {
             ty: ExpressionType::Variable(self.consume().unwrap().chars),
@@ -196,7 +203,7 @@ impl<'s> Parser<'s> {
         };
         Ok(expr)
     }
-    
+
     fn unary(&mut self) -> Result<Expression<'s>, Error> {
         let op = self.consume().unwrap();
         let ty = match op.ty {
@@ -208,16 +215,16 @@ impl<'s> Parser<'s> {
         let expr = self.expression()?;
         let unary = Unary {
             ty: ty.spanned(op.span),
-            expr: Box::new(expr), 
+            expr: Box::new(expr),
         };
         let expr = Expression {
             ty: ExpressionType::Unary(unary),
             expr_ty: None,
         };
-        
+
         Ok(expr)
     }
-    
+
     fn binary(&mut self, left: Expression<'s>) -> Result<Expression<'s>, Error> {
         let op = self.consume().unwrap();
         let ty = match op.ty {
@@ -260,7 +267,7 @@ impl<'s> Parser<'s> {
         };
         Ok(expr)
     }
-    
+
     fn comma(&mut self, left: Expression<'s>) -> Result<Expression<'s>, Error> {
         let _comma = self.consume().unwrap();
         let right = self.parse_precedence(Precedence::Assignment)?;
@@ -274,11 +281,11 @@ impl<'s> Parser<'s> {
         };
         Ok(expr)
     }
-    
+
     fn call(&mut self, procedure: Expression<'s>) -> Result<Expression<'s>, Error> {
         assert_eq!(self.consume().unwrap().ty, TokenType::LeftParen);
         self.next_token_expected_of_type("')'", TokenType::RightParen)?;
-        
+
         let call = Call {
             procedure: Box::new(procedure),
             args: Vec::new(),
@@ -289,15 +296,15 @@ impl<'s> Parser<'s> {
         };
         Ok(expr)
     }
-    
+
     fn parse_precedence(&mut self, precedence: Precedence) -> Result<Expression<'s>, Error> {
-        let prefix = match self.peek().map(|t| Rule::for_type(t.ty).prefix).flatten() {
+        let prefix = match self.peek().and_then(|t| Rule::for_type(t.ty).prefix) {
             Some(p) => p,
             None => return Err("Expected expression".to_string()),
         };
-        
+
         let mut expr = prefix(self)?;
-        
+
         while let Some(infix) = self.peek().map(|t| Rule::for_type(t.ty)) {
             if precedence <= infix.precedence {
                 expr = infix.infix.unwrap()(self, expr)?;
@@ -305,33 +312,33 @@ impl<'s> Parser<'s> {
                 break;
             }
         }
-        
+
         Ok(expr)
     }
-    
+
     fn expression(&mut self) -> Result<Expression<'s>, Error> {
-       self.parse_precedence(Precedence::Comma)
+        self.parse_precedence(Precedence::Comma)
     }
-    
+
     fn return_statement(&mut self, ret: S<'s, Token<'s>>) -> Result<S<'s, Return<'s>>, Error> {
         let next = match self.peek() {
             Some(n) => n,
-            None => return Err(format!("Expected ';' or an expression, found end of file.")),
+            None => return Err("Expected ';' or an expression, found end of file.".to_string()),
         };
         let return_value = match next.ty {
             TokenType::Semicolon => None,
-            _ => Some(self.expression()?)
+            _ => Some(self.expression()?),
         };
         let _semicolon = self.next_token_expected("';'")?;
-        
-        let return_ = Return {
-            expr: return_value,
-        };
+
+        let return_ = Return { expr: return_value };
         Ok(return_.spanned(ret.span))
     }
-    
+
     fn statement(&mut self) -> Result<Statement<'s>, Error> {
-        let ret = self.peek().expect("Not the last token, expected to parse a statement");
+        let ret = self
+            .peek()
+            .expect("Not the last token, expected to parse a statement");
         let stmt_ty = match ret.ty {
             TokenType::Return => {
                 let ret = self.consume().unwrap();
@@ -342,14 +349,12 @@ impl<'s> Parser<'s> {
                 let expr = self.expression()?;
                 self.next_token_expected_of_type("';'", TokenType::Semicolon)?;
                 StatementType::Expression(expr)
-            },
+            }
         };
-        
-        Ok(Statement {
-            ty: stmt_ty,
-        })
+
+        Ok(Statement { ty: stmt_ty })
     }
-    
+
     fn get_names(&mut self) -> Result<Vec<(usize, S<'s, &'s str>)>, Error> {
         let mut names = Vec::new();
         loop {
@@ -368,15 +373,15 @@ impl<'s> Parser<'s> {
             }
             break;
         }
-        
+
         if names.is_empty() {
             return Err("Expected identifiers in variable declaration.".to_string());
         }
-        
+
         if let Err(e) = self.next_token_expected_of_type("';'", TokenType::Semicolon) {
             return Err(e);
         }
-        
+
         Ok(names)
     }
 
@@ -389,19 +394,20 @@ impl<'s> Parser<'s> {
             }
             _ => return None,
         };
-        
+
         let names = match self.get_names() {
             Ok(n) => n,
             Err(e) => return Some(Err(e)),
         };
-        
-        Some(Ok(Declaration {
-            ty,
-            names,
-        }))
+
+        Some(Ok(Declaration { ty, names }))
     }
-    
-    fn procedure(&mut self, ty: S<'s, Token<'s>>, name: S<'s, Token<'s>>) -> Result<Procedure<'s>, Error> {
+
+    fn procedure(
+        &mut self,
+        ty: S<'s, Token<'s>>,
+        name: S<'s, Token<'s>>,
+    ) -> Result<Procedure<'s>, Error> {
         self.next_token_expected_of_type("'('", TokenType::LeftParen)?;
         self.next_token_expected_of_type("')'", TokenType::RightParen)?;
         self.next_token_expected_of_type("'{'", TokenType::LeftBrace)?;
@@ -411,7 +417,7 @@ impl<'s> Parser<'s> {
             let decl = decl?;
             decls.push(decl);
         }
-        
+
         let mut stmts = Vec::new();
         loop {
             if let Some(t) = self.peek() {
@@ -424,12 +430,12 @@ impl<'s> Parser<'s> {
         }
 
         self.next_token_expected_of_type("'}'", TokenType::RightBrace)?;
-        
+
         let return_type = match ty.ty {
             TokenType::Int => Type::Int,
-            _ => return Err(format!("'int' is the only allowed return type.")),
+            _ => return Err("'int' is the only allowed return type.".to_string()),
         };
-        
+
         Ok(Procedure {
             args: Vec::new(),
             name: name.chars.spanned(name.span),
@@ -438,8 +444,12 @@ impl<'s> Parser<'s> {
             body: stmts,
         })
     }
-    
-    fn global_variable(&mut self, ty: S<'s, Token<'s>>, first: S<'s, Token<'s>>) -> Result<GlobalVariable<'s>, Error> {
+
+    fn global_variable(
+        &mut self,
+        ty: S<'s, Token<'s>>,
+        first: S<'s, Token<'s>>,
+    ) -> Result<GlobalVariable<'s>, Error> {
         let mut names = if self.peek().unwrap().ty == TokenType::Comma {
             self.consume();
             self.get_names()?
@@ -448,31 +458,36 @@ impl<'s> Parser<'s> {
             Vec::new()
         };
         names.insert(0, (0, first.chars.spanned(first.span)));
-        
+
         let ast_ty = match ty.ty {
             TokenType::Int => Type::Int,
-            _ => return Err(format!("'int' is the only allowed type.")),
+            _ => return Err("'int' is the only allowed type.".to_string()),
         };
-        
+
         Ok(GlobalVariable {
             ty: ast_ty.spanned(ty.span),
             names,
         })
     }
-    
+
     fn top_level_decl(&mut self, ty: S<'s, Token<'s>>) -> Result<TopLevel<'s>, Error> {
-        let identifier = self.next_token_expected_of_type("an identifier", TokenType::Identifier)?;
-        
+        let identifier =
+            self.next_token_expected_of_type("an identifier", TokenType::Identifier)?;
+
         let top_level_ty = match self.peek() {
-            Some(t) if t.ty == TokenType::Semicolon || t.ty == TokenType::Comma => TopLevelType::Variable(self.global_variable(ty, identifier)?),
-            Some(t) if t.ty == TokenType::LeftParen => TopLevelType::Procedure(self.procedure(ty, identifier)?),
+            Some(t) if t.ty == TokenType::Semicolon || t.ty == TokenType::Comma => {
+                TopLevelType::Variable(self.global_variable(ty, identifier)?)
+            }
+            Some(t) if t.ty == TokenType::LeftParen => {
+                TopLevelType::Procedure(self.procedure(ty, identifier)?)
+            }
             Some(t) => return Err(format!("Expected either '(' or ';', found '{}'", t.chars)),
-            None => return Err(format!("Expected either '(' or ';', found nothing.")),
+            None => return Err("Expected either '(' or ';', found nothing.".to_string()),
         };
-        
+
         Ok(TopLevel { ty: top_level_ty })
     }
-    
+
     fn top_level(&mut self) -> Result<TopLevel<'s>, Error> {
         let int = self.next_token_expected_of_type("'int'", TokenType::Int)?;
         self.top_level_decl(int)

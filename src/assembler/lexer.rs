@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
-use crate::{InstructionType, Span};
 use crate::char_utils::CharIter;
+use crate::{InstructionType, Span};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DirectiveType {
@@ -60,19 +60,19 @@ pub struct Token<'a> {
 }
 
 fn is_decimal(c: char) -> bool {
-    c >= '0' && c <= '9'
+    ('0'..='9').contains(&c)
 }
 
 fn is_hex(c: char) -> bool {
-    is_decimal(c) || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
+    is_decimal(c) || ('a'..='f').contains(&c) || ('A'..='F').contains(&c)
 }
 
 fn is_alpha(c: char) -> bool {
-    c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+    ('a'..='z').contains(&c) || ('A'..='Z').contains(&c)
 }
 
 fn is_identifier(c: char) -> bool {
-     is_alpha(c) || is_decimal(c) || c == '_'
+    is_alpha(c) || is_decimal(c) || c == '_'
 }
 
 fn is_whitespace(c: char) -> bool {
@@ -148,7 +148,6 @@ fn instruction_type(s: &str) -> Option<InstructionType> {
     }
 }
 
-
 pub struct Lexer<'a> {
     input: &'a str,
     char_iter: CharIter<'a>,
@@ -159,14 +158,14 @@ pub struct Lexer<'a> {
 impl<'a> Lexer<'a> {
     pub fn new(input: &'a str) -> Self {
         let char_iter = CharIter::new(input);
-        Lexer { 
-            input, 
+        Lexer {
+            input,
             char_iter,
             token_start: 0,
             line: 1,
         }
     }
-    
+
     fn span(&mut self) -> (Span<'a>, &'a str) {
         let span = Span::new(
             self.input,
@@ -176,37 +175,34 @@ impl<'a> Lexer<'a> {
         );
         (span, &self.input[span.start..span.end])
     }
-    
+
     fn consume_while(&mut self, f: impl Fn(char) -> bool) {
         while let Some(c) = self.char_iter.peek() {
             if !f(c) {
                 return;
             }
             self.char_iter.consume();
-            if c == '\n' { 
+            if c == '\n' {
                 self.line += 1
             }
         }
     }
-    
+
     fn consume_whitespace(&mut self) {
         self.consume_while(is_whitespace);
     }
-    
+
     fn check(&mut self, f: impl Fn(char) -> bool) -> bool {
-        match self.char_iter.peek() {
-            Some(c) if f(c) => true,
-            _ => false,
-        }
+        matches!(self.char_iter.peek(), Some(c) if f(c))
     }
-    
+
     fn directive(&mut self) -> Result<Token<'a>, String> {
         if !self.check(is_identifier) {
-            return Err(format!("Expected directive name after '.'."));
+            return Err("Expected directive name after '.'.".to_string());
         } else {
             self.consume_while(is_alpha);
             if !self.check(is_not_token) {
-                return Err(format!("Expected space after directive name."));
+                return Err("Expected space after directive name.".to_string());
             }
         }
 
@@ -217,10 +213,10 @@ impl<'a> Lexer<'a> {
             return Err(format!("{} is not a directive name.", &chars[1..]));
         };
         let token = Token { span, chars, ty };
-    
-        return Ok(token);
+
+        Ok(token)
     }
-    
+
     fn decimal(&mut self, leading_pound: bool) -> Result<Token<'a>, String> {
         let mut is_negative = false;
 
@@ -230,10 +226,10 @@ impl<'a> Lexer<'a> {
                 is_negative = true;
             }
             if !self.check(is_decimal) {
-                return Err(format!("Expected decimal number after '#'."));
+                return Err("Expected decimal number after '#'.".to_string());
             }
         }
-        
+
         self.consume_while(is_decimal);
         if !self.check(is_not_token) {
             return Err(String::from("Expected space after decimal literal."));
@@ -241,45 +237,66 @@ impl<'a> Lexer<'a> {
 
         let (span, chars) = self.span();
         let mut value_text = chars;
-        if leading_pound { 
+        if leading_pound {
             value_text = &value_text[1..];
         }
 
         if !is_negative {
             match value_text.parse::<u16>() {
-                Ok(v) =>  {
-                    let token = Token { span, chars, ty: TokenType::Literal(LiteralType::Unsigned(v)) };
-                    return Ok(token);
-                },
-                Err(e) => match e.kind() {
-                    std::num::IntErrorKind::PosOverflow => return Err(format!("{} is too large to fit in a 16 bit unsigned integer.", value_text)),
-                    _ => panic!("Internal integer parse error {:?} on text '{}'.", e, value_text),
+                Ok(v) => {
+                    let token = Token {
+                        span,
+                        chars,
+                        ty: TokenType::Literal(LiteralType::Unsigned(v)),
+                    };
+                    Ok(token)
                 }
-            };
+                Err(e) => match e.kind() {
+                    std::num::IntErrorKind::PosOverflow => Err(format!(
+                        "{} is too large to fit in a 16 bit unsigned integer.",
+                        value_text
+                    )),
+                    _ => panic!(
+                        "Internal integer parse error {:?} on text '{}'.",
+                        e, value_text
+                    ),
+                },
+            }
         } else {
             match value_text.parse::<i16>() {
-                Ok(v) =>  {
-                    let token = Token { span, chars, ty: TokenType::Literal(LiteralType::Signed(v)) };
-                    return Ok(token);
-                },
-                Err(e) => match e.kind() {
-                    std::num::IntErrorKind::PosOverflow => return Err(format!("{} is too large to fit in a 16 bit signed integer.", value_text)),
-                    std::num::IntErrorKind::NegOverflow => return Err(format!("{} is too small to fit in a 16 bit signed integer.", value_text)),
-                    _ => panic!("Internal integer parse error {:?} on text '{}'.", e, value_text),
+                Ok(v) => {
+                    let token = Token {
+                        span,
+                        chars,
+                        ty: TokenType::Literal(LiteralType::Signed(v)),
+                    };
+                    Ok(token)
                 }
-            };
+                Err(e) => match e.kind() {
+                    std::num::IntErrorKind::PosOverflow => Err(format!(
+                        "{} is too large to fit in a 16 bit signed integer.",
+                        value_text
+                    )),
+                    std::num::IntErrorKind::NegOverflow => Err(format!(
+                        "{} is too small to fit in a 16 bit signed integer.",
+                        value_text
+                    )),
+                    _ => panic!(
+                        "Internal integer parse error {:?} on text '{}'.",
+                        e, value_text
+                    ),
+                },
+            }
         }
-        
     }
-    
+
     fn single_char(&mut self, ty: TokenType<'a>) -> Result<Token<'a>, String> {
         let (span, chars) = self.span();
         let token = Token { span, chars, ty };
         Ok(token)
     }
-    
-    fn string(&mut self) -> Result<Token<'a>, String> {
 
+    fn string(&mut self) -> Result<Token<'a>, String> {
         // custom consume_while to accomodate \" sequence
         let mut escaped = false;
         while let Some(c) = self.char_iter.peek() {
@@ -293,7 +310,7 @@ impl<'a> Lexer<'a> {
                 escaped = false;
             }
             self.char_iter.consume();
-            if c == '\n' { 
+            if c == '\n' {
                 self.line += 1
             }
         }
@@ -329,10 +346,14 @@ impl<'a> Lexer<'a> {
             Cow::Borrowed(contents)
         };
 
-        let token = Token { span, chars, ty: TokenType::String(contents) };
+        let token = Token {
+            span,
+            chars,
+            ty: TokenType::String(contents),
+        };
         Ok(token)
     }
-    
+
     fn hex(&mut self) -> Result<Token<'a>, String> {
         self.consume_while(is_hex);
 
@@ -341,21 +362,34 @@ impl<'a> Lexer<'a> {
         }
 
         let (span, chars) = self.span();
-        
+
         let value_text = &chars[2..];
         let value = match u16::from_str_radix(value_text, 16) {
             Ok(v) => v,
             Err(e) => match e.kind() {
-                std::num::IntErrorKind::PosOverflow => return Err(format!("{} is too large to fit in 16 bits.", value_text)),
-                _ => panic!("Internal integer parse error {:?} on text '{}'.", e, value_text),
-            }
+                std::num::IntErrorKind::PosOverflow => {
+                    return Err(format!("{} is too large to fit in 16 bits.", value_text))
+                }
+                _ => panic!(
+                    "Internal integer parse error {:?} on text '{}'.",
+                    e, value_text
+                ),
+            },
         };
 
-        let token = Token { span, chars, ty: TokenType::Literal(LiteralType::Unsigned(value)) };
+        let token = Token {
+            span,
+            chars,
+            ty: TokenType::Literal(LiteralType::Unsigned(value)),
+        };
         Ok(token)
     }
-    
-    fn identifier(&mut self, could_be_hex: bool, could_be_register: bool) -> Result<Token<'a>, String> {
+
+    fn identifier(
+        &mut self,
+        could_be_hex: bool,
+        could_be_register: bool,
+    ) -> Result<Token<'a>, String> {
         self.consume_while(is_identifier);
         let (span, chars) = self.span();
 
@@ -364,47 +398,72 @@ impl<'a> Lexer<'a> {
             let value = match u16::from_str_radix(value_text, 16) {
                 Ok(v) => v,
                 Err(e) => match e.kind() {
-                    std::num::IntErrorKind::PosOverflow => return Err(format!("{} is too large to fit in 16 bits.", value_text)),
-                    _ => panic!("Internal integer parse error {:?} on text '{}'.", e, value_text),
-                }
+                    std::num::IntErrorKind::PosOverflow => {
+                        return Err(format!("{} is too large to fit in 16 bits.", value_text))
+                    }
+                    _ => panic!(
+                        "Internal integer parse error {:?} on text '{}'.",
+                        e, value_text
+                    ),
+                },
             };
 
-            let token = Token { span, chars, ty: TokenType::Identifier(Identifier::Hex(value)) };
+            let token = Token {
+                span,
+                chars,
+                ty: TokenType::Identifier(Identifier::Hex(value)),
+            };
             return Ok(token);
         }
-        
+
         if could_be_register && chars[1..].chars().all(is_decimal) {
-            
             let value_text = &chars[1..];
-            let value = match u8::from_str_radix(value_text, 10) {
+            let value = match value_text.parse::<u8>() {
                 Ok(v) => v,
                 Err(e) => match e.kind() {
-                    std::num::IntErrorKind::PosOverflow => return Err(format!("No such register '{}'.", value_text)),
-                    _ => panic!("Internal integer parse error {:?} on text '{}'.", e, value_text),
-                }
+                    std::num::IntErrorKind::PosOverflow => {
+                        return Err(format!("No such register '{}'.", value_text))
+                    }
+                    _ => panic!(
+                        "Internal integer parse error {:?} on text '{}'.",
+                        e, value_text
+                    ),
+                },
             };
             if value >= 8 {
                 return Err(format!("No such register '{}'.", value_text));
             }
 
-            let token = Token { span, chars, ty: TokenType::Identifier(Identifier::Register(value)) };
+            let token = Token {
+                span,
+                chars,
+                ty: TokenType::Identifier(Identifier::Register(value)),
+            };
             return Ok(token);
         }
-        
+
         if let Some(ty) = instruction_type(chars) {
-            let token = Token { span, chars, ty: TokenType::Instruction(ty) };
-            return Ok(token)
+            let token = Token {
+                span,
+                chars,
+                ty: TokenType::Instruction(ty),
+            };
+            return Ok(token);
         }
 
-        let token = Token { span, chars, ty: TokenType::Identifier(Identifier::Identifier) };
+        let token = Token {
+            span,
+            chars,
+            ty: TokenType::Identifier(Identifier::Identifier),
+        };
         Ok(token)
     }
-    
+
     fn next_token(&mut self) -> Option<Result<Token<'a>, String>> {
         loop {
             self.consume_whitespace();
             self.token_start = self.char_iter.peek_position();
-    
+
             match self.char_iter.consume()? {
                 ';' => self.consume_while(|c| c != '\n'),
                 ',' => return Some(self.single_char(TokenType::Comma)),
@@ -415,10 +474,10 @@ impl<'a> Lexer<'a> {
                     if let Some(c) = self.char_iter.peek() {
                         if c == 'x' || c == 'X' {
                             self.char_iter.consume();
-                            return Some(self.hex())
+                            return Some(self.hex());
                         }
                     }
-                    return Some(self.decimal(false))
+                    return Some(self.decimal(false));
                 }
                 'r' | 'R' => return Some(self.identifier(false, true)),
                 'x' | 'X' => return Some(self.identifier(true, false)),
@@ -436,7 +495,7 @@ impl<'a> Lexer<'a> {
 
 impl<'a> Iterator for Lexer<'a> {
     type Item = Result<Token<'a>, (usize, String)>;
-    
+
     fn next(&mut self) -> Option<Self::Item> {
         self.next_token().map(|t| t.map_err(|e| (self.line, e)))
     }

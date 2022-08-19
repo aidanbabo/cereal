@@ -1,10 +1,14 @@
 use std::collections::HashMap;
 
-use crate::{Block, BlockType, InstructionWithLabel, Data};
 use crate::c::ast::*;
 use crate::insn;
+use crate::{Block, BlockType, Data, InstructionWithLabel};
 
-pub fn generate<'c, 's>(ast: Vec<TopLevel<'s>>, blocks: &'c mut Vec<Block<'s>>, constants: &'c mut HashMap<&'s str, i32>) {
+pub fn generate<'c, 's>(
+    ast: Vec<TopLevel<'s>>,
+    blocks: &'c mut Vec<Block<'s>>,
+    constants: &'c mut HashMap<&'s str, i32>,
+) {
     let mut ctx = CgContext::new(blocks, constants);
     for top_level in ast {
         ctx.generate_top_level(top_level);
@@ -21,7 +25,7 @@ enum Location<'s> {
 }
 
 struct CgContext<'c, 's> {
-    blocks: &'c mut Vec<Block<'s>>, 
+    blocks: &'c mut Vec<Block<'s>>,
     _constants: &'c mut HashMap<&'s str, i32>,
     available_registers: Vec<i8>,
     stack_slots_spilled: usize,
@@ -42,7 +46,7 @@ impl<'c, 's> CgContext<'c, 's> {
             stack_space: None,
         }
     }
-    
+
     fn instructions(&mut self) -> &mut Vec<InstructionWithLabel<'s>> {
         // @Cleanup This is insane person code to satisfy the borrow checker
         loop {
@@ -55,14 +59,16 @@ impl<'c, 's> CgContext<'c, 's> {
                     labels: Vec::new(),
                     ty: BlockType::Code(Vec::new()),
                 };
-            
+
                 self.blocks.push(block);
             }
         }
 
         if let Some(BlockType::Code(i)) = self.blocks.last_mut().map(|b| &mut b.ty) {
             i
-        } else { panic!() }
+        } else {
+            panic!()
+        }
     }
 
     fn new_data(&mut self, label: &'s str) -> &mut Vec<Data<'s>> {
@@ -72,13 +78,15 @@ impl<'c, 's> CgContext<'c, 's> {
             labels: vec![label],
             ty: BlockType::Data(Vec::new()),
         };
-    
+
         self.blocks.push(block);
         if let Some(BlockType::Data(d)) = self.blocks.last_mut().map(|b| &mut b.ty) {
             d
-        } else { panic!() }
+        } else {
+            panic!()
+        }
     }
-    
+
     fn take_available_register(&mut self, not: Option<i8>) -> i8 {
         self.available_registers.pop().unwrap_or_else(|| {
             let reg = not.map_or(0, |not| (not + 1) % 4);
@@ -98,7 +106,7 @@ impl<'c, 's> CgContext<'c, 's> {
             self.available_registers.push(reg)
         }
     }
-    
+
     fn resolve(&self, name: &str) -> Location<'s> {
         let local = self.locals.get(name);
         if let Some(&l) = local {
@@ -108,7 +116,7 @@ impl<'c, 's> CgContext<'c, 's> {
         if let Some(&g) = global {
             return g;
         }
-            
+
         panic!("No identifier named {}", name)
     }
 
@@ -128,7 +136,7 @@ impl<'c, 's> CgContext<'c, 's> {
         // src -> reg
         match src {
             Nowhere => panic!(),
-            Register(_) => {},
+            Register(_) => {}
             OffsetFrame(offset) => self.instructions().push(insn::ldr(reg, 5, offset)),
             OffsetStack(offset) => self.instructions().push(insn::ldr(reg, 6, offset)),
             Label(label) => {
@@ -142,7 +150,7 @@ impl<'c, 's> CgContext<'c, 's> {
         // reg -> dst
         match dst {
             Nowhere => panic!(),
-            Register(_) => {},
+            Register(_) => {}
             OffsetFrame(offset) => self.instructions().push(insn::str(reg, 5, offset)),
             OffsetStack(offset) => self.instructions().push(insn::str(reg, 6, offset)),
             Label(label) => {
@@ -152,7 +160,7 @@ impl<'c, 's> CgContext<'c, 's> {
                 self.return_available_register(addr);
             }
         }
-        
+
         if needs_return {
             self.return_available_register(reg);
         }
@@ -193,7 +201,7 @@ impl<'c, 's> CgContext<'c, 's> {
                 self.instructions().push(insn::addi(dest, dest, 1));
             }
             UnaryType::BitNot => self.instructions().push(insn::not(dest, dest)),
-            UnaryType::Plus => { /* no -op */ },
+            UnaryType::Plus => { /* no -op */ }
         }
     }
 
@@ -204,9 +212,7 @@ impl<'c, 's> CgContext<'c, 's> {
                 self.generate_expression(*binary.right, location);
                 return;
             }
-            Location::Register(dest) => {
-                (dest, self.take_available_register(Some(dest)))
-            }
+            Location::Register(dest) => (dest, self.take_available_register(Some(dest))),
             _ => unreachable!(),
         };
         self.generate_expression(*binary.right, Location::Register(reg));
@@ -221,27 +227,27 @@ impl<'c, 's> CgContext<'c, 's> {
             BinaryType::BitXor => self.instructions().push(insn::xor(dest, dest, reg)),
             BinaryType::BitOr => self.instructions().push(insn::or(dest, dest, reg)),
         }
-        
+
         self.return_available_register(reg);
     }
-    
+
     fn generate_getter(&mut self, expr: Expression<'s>, location: Location<'s>) {
         match expr.ty {
             ExpressionType::Variable(name) => {
                 let variable_location = self.resolve(name);
                 self.mov(location, variable_location);
-            },
+            }
             _ => panic!("Expression is not assignable!"),
         }
     }
-    
+
     fn generate_setter(&mut self, expr: Expression<'s>) -> Location<'s> {
         match expr.ty {
             ExpressionType::Variable(name) => self.resolve(name),
             _ => panic!("Expression is not assignable!"),
         }
     }
-    
+
     fn generate_assignment(&mut self, assignment: Assignment<'s>, location: Location<'s>) {
         let assign_to = self.generate_setter(*assignment.left);
         let (location, needs_return) = if let Location::Nowhere = location {
@@ -256,24 +262,27 @@ impl<'c, 's> CgContext<'c, 's> {
         self.mov(assign_to, location);
         match location {
             Location::Register(reg) if needs_return => self.return_available_register(reg),
-            _ => {},
+            _ => {}
         }
     }
-    
+
     fn generate_comma(&mut self, comma: Comma<'s>, location: Location<'s>) {
         self.generate_expression(*comma.left, Location::Nowhere);
         self.generate_expression(*comma.right, location);
     }
-    
+
     fn generate_call(&mut self, call: Call<'s>, location: Location<'s>) {
         let proc = if let ExpressionType::Variable(v) = call.procedure.ty {
             v
         } else {
             panic!("Only supporting named procedure calls.");
         };
-        
-        assert!(call.args.is_empty(), "Only working with nullary procedures.");
-        
+
+        assert!(
+            call.args.is_empty(),
+            "Only working with nullary procedures."
+        );
+
         self.instructions().push(insn::jsr(proc));
         self.mov(location, Location::OffsetStack(-1));
     }
@@ -282,14 +291,18 @@ impl<'c, 's> CgContext<'c, 's> {
         let (dest, needs_move) = match location {
             Location::Nowhere => (-1, false),
             Location::Register(dest) => (dest, false),
-            Location::OffsetFrame(_) | Location::OffsetStack(_) | Location::Label(_) => (self.take_available_register(None), true),
+            Location::OffsetFrame(_) | Location::OffsetStack(_) | Location::Label(_) => {
+                (self.take_available_register(None), true)
+            }
         };
-        
+
         match expression.ty {
             ExpressionType::Literal(literal) => self.generate_literal(literal, location),
             ExpressionType::Unary(unary) => self.generate_unary(unary, location),
             ExpressionType::Binary(binary) => self.generate_binary(binary, location),
-            ExpressionType::Assignment(assignment) => self.generate_assignment(assignment, location),
+            ExpressionType::Assignment(assignment) => {
+                self.generate_assignment(assignment, location)
+            }
             ExpressionType::Variable(_) => self.generate_getter(expression, location),
             ExpressionType::Comma(comma) => self.generate_comma(comma, location),
             ExpressionType::Call(call) => self.generate_call(call, location),
@@ -299,26 +312,27 @@ impl<'c, 's> CgContext<'c, 's> {
             self.mov(location, Location::Register(dest));
             self.return_available_register(dest);
         }
-        
     }
 
     fn generate_return(&mut self, ret: Return<'s>) {
         if let Some(expr) = ret.expr {
             self.generate_expression(expr, Location::Register(7));
         }
-    
-        let stack_space = self.stack_space.expect("Didn't calculate stack space for procedure.");
+
+        let stack_space = self
+            .stack_space
+            .expect("Didn't calculate stack space for procedure.");
         let instructions = self.instructions();
-        
+
         if stack_space != 0 {
             instructions.push(insn::addi(6, 6, -stack_space));
         }
-    
-        instructions.push(insn::addi(6, 6, 3));    // free space for return address, base pointer, and return value
-        instructions.push(insn::str(7, 6, -1));    // store return value
-        instructions.push(insn::ldr(7, 6, -2));    // restore return address
-        instructions.push(insn::ldr(5, 6, -3));    // restore base pointer
-        instructions.push(insn::jmpr(7));          // return
+
+        instructions.push(insn::addi(6, 6, 3)); // free space for return address, base pointer, and return value
+        instructions.push(insn::str(7, 6, -1)); // store return value
+        instructions.push(insn::ldr(7, 6, -2)); // restore return address
+        instructions.push(insn::ldr(5, 6, -3)); // restore base pointer
+        instructions.push(insn::jmpr(7)); // return
     }
 
     fn generate_statement(&mut self, statement: Statement<'s>) {
@@ -329,45 +343,50 @@ impl<'c, 's> CgContext<'c, 's> {
     }
 
     fn generate_procedure(&mut self, procedure: Procedure<'s>) {
-        assert!(procedure.args.is_empty(), "only working with nullary procedures");
-        
+        assert!(
+            procedure.args.is_empty(),
+            "only working with nullary procedures"
+        );
+
         self.locals.clear();
         let mut stack_index = -1;
         for decl in procedure.declarations {
             for (_, name) in decl.names {
-                self.locals.insert(*name, Location::OffsetFrame(stack_index));
+                self.locals
+                    .insert(*name, Location::OffsetFrame(stack_index));
                 stack_index -= 1;
             }
         }
         let stack_space = stack_index + 1;
         self.stack_space = Some(stack_space);
-    
-        let mut instructions = Vec::new();
-    
+
         // prologue
-        instructions.push(insn::str(7, 6, -2));    // save return address
-        instructions.push(insn::str(5, 6, -3));    // save frame pointer
-        instructions.push(insn::addi(6, 6, -3));   // update stack pointer
-        instructions.push(insn::addi(5, 6, 0));    // set frame pointer to new stack pointer
+        let mut instructions = vec![
+            insn::str(7, 6, -2),  // save return address
+            insn::str(5, 6, -3),  // save frame pointer
+            insn::addi(6, 6, -3), // update stack pointer
+            insn::addi(5, 6, 0),  // set frame pointer to new stack pointer
+        ];
         if stack_space != 0 {
             instructions.push(insn::addi(6, 6, stack_space));
         }
-    
+
         let block = Block {
             addr: None,
             aligned: true,
             labels: vec![*procedure.name],
             ty: BlockType::Code(instructions),
         };
-        self.globals.insert(*procedure.name, Location::Label(*procedure.name));
-    
+        self.globals
+            .insert(*procedure.name, Location::Label(*procedure.name));
+
         self.blocks.push(block);
-    
+
         for statement in procedure.body {
             self.generate_statement(statement);
         }
     }
-    
+
     fn generate_global(&mut self, global: GlobalVariable<'s>) {
         for (_, name) in global.names {
             let data = self.new_data(*name);

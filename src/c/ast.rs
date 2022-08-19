@@ -123,11 +123,10 @@ pub struct GlobalVariable<'s> {
 #[derive(Debug)]
 pub enum TopLevelType<'s> {
     Procedure(Procedure<'s>),
-    Variable(GlobalVariable<'s>)
+    Variable(GlobalVariable<'s>),
 }
 
 #[derive(Debug)]
 pub struct TopLevel<'s> {
     pub ty: TopLevelType<'s>,
 }
-

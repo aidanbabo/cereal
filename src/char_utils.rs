@@ -12,7 +12,7 @@ impl<'a> CharIter<'a> {
             total_bytes: input.len(),
         }
     }
-    
+
     fn fill_peek(&mut self) {
         if self.peek_pair.is_none() {
             if let Some(p) = self.iter.next() {
@@ -20,12 +20,12 @@ impl<'a> CharIter<'a> {
             }
         }
     }
-    
+
     pub fn peek(&mut self) -> Option<char> {
         self.fill_peek();
         Some(self.peek_pair?.1)
     }
-    
+
     pub fn peek_position(&mut self) -> usize {
         self.fill_peek();
         match self.peek_pair {
@@ -33,18 +33,14 @@ impl<'a> CharIter<'a> {
             None => self.total_bytes,
         }
     }
-    
+
     pub fn consume(&mut self) -> Option<char> {
         match self.peek_pair {
             Some((_, c)) => {
                 self.peek_pair = None;
                 Some(c)
             }
-            None => match self.iter.next() {
-                Some((_, c)) => Some(c),
-                None => None,
-            }
+            None => self.iter.next().map(|(_, c)| c),
         }
     }
 }
-
