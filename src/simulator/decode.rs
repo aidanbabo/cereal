@@ -180,7 +180,6 @@ fn logical(word: u16, trace: &mut Option<Trace>) -> Instruction {
         }
     };
 
-    // @Todo should we zero out rt for NOT ?
     let rt = (word & 0x0007) as u8;
 
     Instruction {

@@ -107,7 +107,7 @@ pub struct Declaration<'s> {
 
 #[derive(Debug)]
 pub struct Procedure<'s> {
-    pub args: Vec<S<'s, (Type, &'s str)>>,
+    pub params: Vec<(S<'s, Type>, S<'s, &'s str>)>,
     pub name: S<'s, &'s str>,
     pub return_type: Option<S<'s, Type>>,
     pub declarations: Vec<Declaration<'s>>,

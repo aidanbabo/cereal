@@ -127,7 +127,6 @@ impl<'s> Rule<'s> {
 pub struct Parser<'s> {
     tokens: Vec<S<'s, Token<'s>>>,
     next_token: usize,
-    _peek_token: Option<Token<'s>>,
 }
 
 impl<'s> Parser<'s> {
@@ -135,7 +134,6 @@ impl<'s> Parser<'s> {
         Parser {
             tokens,
             next_token: 0,
-            _peek_token: None,
         }
     }
 
@@ -284,11 +282,28 @@ impl<'s> Parser<'s> {
 
     fn call(&mut self, procedure: Expression<'s>) -> Result<Expression<'s>, Error> {
         assert_eq!(self.consume().unwrap().ty, TokenType::LeftParen);
+        let args = {
+            let mut args = Vec::new();
+            while self
+                .peek()
+                .filter(|p| p.ty != TokenType::RightParen)
+                .is_some()
+            {
+                let expr = self.parse_precedence(Precedence::Assignment)?;
+                args.push(expr);
+                // @Todo allows trailing comma
+                if self.peek().filter(|p| p.ty == TokenType::Comma).is_some() {
+                    self.consume().unwrap();
+                }
+            }
+            args
+        };
+
         self.next_token_expected_of_type("')'", TokenType::RightParen)?;
 
         let call = Call {
             procedure: Box::new(procedure),
-            args: Vec::new(),
+            args,
         };
         let expr = Expression {
             ty: ExpressionType::Call(call),
@@ -378,9 +393,7 @@ impl<'s> Parser<'s> {
             return Err("Expected identifiers in variable declaration.".to_string());
         }
 
-        if let Err(e) = self.next_token_expected_of_type("';'", TokenType::Semicolon) {
-            return Err(e);
-        }
+        self.next_token_expected_of_type("';'", TokenType::Semicolon)?;
 
         Ok(names)
     }
@@ -409,6 +422,28 @@ impl<'s> Parser<'s> {
         name: S<'s, Token<'s>>,
     ) -> Result<Procedure<'s>, Error> {
         self.next_token_expected_of_type("'('", TokenType::LeftParen)?;
+
+        let params = {
+            let mut params = Vec::new();
+            while self.peek().filter(|p| p.ty == TokenType::Int).is_some() {
+                let int = self.consume().unwrap();
+                let parameter =
+                    self.next_token_expected_of_type("identifier", TokenType::Identifier)?;
+                params.push((
+                    Type::Int.spanned(int.span),
+                    parameter.chars.spanned(parameter.span),
+                ));
+
+                // @Todo allows trailing commas
+                if self.peek().filter(|t| t.ty == TokenType::Comma).is_some() {
+                    self.consume().unwrap();
+                } else {
+                    break;
+                }
+            }
+            params
+        };
+
         self.next_token_expected_of_type("')'", TokenType::RightParen)?;
         self.next_token_expected_of_type("'{'", TokenType::LeftBrace)?;
 
@@ -437,7 +472,7 @@ impl<'s> Parser<'s> {
         };
 
         Ok(Procedure {
-            args: Vec::new(),
+            params,
             name: name.chars.spanned(name.span),
             return_type: Some(return_type.spanned(ty.span)),
             declarations: decls,

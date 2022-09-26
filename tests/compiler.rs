@@ -23,6 +23,7 @@ simple_compiler_test! {
     stack_variable 5,
     global_variable 5,
     procedure_call 5,
+    procedure_call_with_args 5,
 }
 
 fn _simple_compiler_test(input: &[&str], output: &str) -> i16 {
@@ -44,7 +45,7 @@ fn _simple_compiler_test(input: &[&str], output: &str) -> i16 {
     let options = Options {
         trace_path: None,
         input_paths: vec![output.into()],
-        step_cap: None,
+        step_cap: Some(5000),
         loader_trace: false,
     };
 

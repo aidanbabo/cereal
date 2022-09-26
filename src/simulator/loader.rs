@@ -4,12 +4,11 @@ use std::io::{self, Write};
 use super::decode::{decode, InvalidInstructionError};
 use super::Machine;
 
-// @Todo complete
 fn print_instruction(word: u16, trace: &mut dyn Write) -> io::Result<()> {
     let instruction = decode(word, &mut None);
     match instruction {
         Ok(instruction) => writeln!(trace, "\t{}", instruction)?,
-        Err(InvalidInstructionError) => writeln!(trace, "\tInvalid Instruction")?,
+        Err(InvalidInstructionError) => writeln!(trace, "\t;; INVALID INSTRUCTION")?,
     }
     Ok(())
 }
@@ -79,8 +78,7 @@ impl<'a> Reader<'a> {
     }
 }
 
-// @Todo check code and data addresses
-// @Todo proper bounds checking errors
+// @Feature check code and data addresses
 pub(super) fn load(
     bytes: &[u8],
     machine: &mut Machine,
@@ -186,7 +184,7 @@ pub(super) fn load(
             }
             _ => {
                 if let Some(trace) = trace.as_deref_mut() {
-                    let _ = writeln!(trace, "; Error encountered");
+                    let _ = writeln!(trace, ";; ERROR: Invalid header: {:x}", word);
                 }
                 return Err(LoadError {
                     kind: LoadErrorKind::InvalidHeader { word },

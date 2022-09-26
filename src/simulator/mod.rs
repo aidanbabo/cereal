@@ -195,7 +195,7 @@ impl std::fmt::Display for Instruction {
                 "{} r{}, r{}, #{}",
                 self.ty.to_mnemonic(),
                 self.rd,
-                self.rt,
+                self.rs,
                 self.immediate
             ),
             InstructionType::Str => write!(
@@ -730,7 +730,7 @@ pub fn run(options: Options) -> i16 {
                 continue;
             }
         };
-        let loader_trace = options.loader_trace.then(|| &mut stdout as _); // unsizing coercion
+        let loader_trace = options.loader_trace.then_some(&mut stdout as _); // unsizing coercion
         loader::load(&bytes, &mut machine, loader_trace).expect("Load failure");
     }
 
@@ -743,7 +743,7 @@ pub fn run(options: Options) -> i16 {
     while machine.pc() != 0x80ff {
         steps += 1;
         match options.step_cap {
-            Some(cap) if steps > cap => break,
+            Some(cap) if steps > cap => panic!("exceeded step limit"),
             _ => {}
         }
 

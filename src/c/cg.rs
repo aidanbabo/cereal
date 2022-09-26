@@ -167,9 +167,12 @@ impl<'c, 's> CgContext<'c, 's> {
     }
 
     fn generate_literal(&mut self, literal: Literal<'s>, location: Location<'s>) {
-        let reg = match location {
+        let (reg, needs_move) = match location {
             Location::Nowhere => return,
-            Location::Register(reg) => reg,
+            Location::Register(reg) => (reg, false),
+            Location::OffsetFrame(_) | Location::OffsetStack(_) => {
+                (self.take_available_register(None), true)
+            }
             _ => unreachable!(),
         };
 
@@ -182,6 +185,11 @@ impl<'c, 's> CgContext<'c, 's> {
                     instructions.push(insn::hiconst(reg, num >> 8));
                 }
             }
+        }
+
+        if needs_move {
+            self.mov(location, Location::Register(reg));
+            self.return_available_register(reg);
         }
     }
 
@@ -278,24 +286,26 @@ impl<'c, 's> CgContext<'c, 's> {
             panic!("Only supporting named procedure calls.");
         };
 
-        assert!(
-            call.args.is_empty(),
-            "Only working with nullary procedures."
-        );
+        let nargs = call.args.len();
+
+        if nargs > 0 {
+            self.instructions().push(insn::addi(6, 6, -(nargs as i32)));
+            for (dist, arg) in call.args.into_iter().enumerate() {
+                self.generate_expression(arg, Location::OffsetStack(dist as i32));
+            }
+        }
 
         self.instructions().push(insn::jsr(proc));
         self.mov(location, Location::OffsetStack(-1));
+
+        if nargs > 0 {
+            self.instructions().push(insn::addi(6, 6, nargs as i32));
+        }
     }
 
+    // The `Location` will always be vacant *before* the call to `generate_expression` is made
+    // this way we can allocate more space only if needed
     fn generate_expression(&mut self, expression: Expression<'s>, location: Location<'s>) {
-        let (dest, needs_move) = match location {
-            Location::Nowhere => (-1, false),
-            Location::Register(dest) => (dest, false),
-            Location::OffsetFrame(_) | Location::OffsetStack(_) | Location::Label(_) => {
-                (self.take_available_register(None), true)
-            }
-        };
-
         match expression.ty {
             ExpressionType::Literal(literal) => self.generate_literal(literal, location),
             ExpressionType::Unary(unary) => self.generate_unary(unary, location),
@@ -306,11 +316,6 @@ impl<'c, 's> CgContext<'c, 's> {
             ExpressionType::Variable(_) => self.generate_getter(expression, location),
             ExpressionType::Comma(comma) => self.generate_comma(comma, location),
             ExpressionType::Call(call) => self.generate_call(call, location),
-        }
-
-        if needs_move {
-            self.mov(location, Location::Register(dest));
-            self.return_available_register(dest);
         }
     }
 
@@ -343,12 +348,11 @@ impl<'c, 's> CgContext<'c, 's> {
     }
 
     fn generate_procedure(&mut self, procedure: Procedure<'s>) {
-        assert!(
-            procedure.args.is_empty(),
-            "only working with nullary procedures"
-        );
-
         self.locals.clear();
+        for (dist, (_ty, name)) in procedure.params.iter().enumerate() {
+            self.locals
+                .insert(name, Location::OffsetFrame(dist as i32 + 3));
+        }
         let mut stack_index = -1;
         for decl in procedure.declarations {
             for (_, name) in decl.names {

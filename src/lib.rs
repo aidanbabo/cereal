@@ -537,7 +537,7 @@ fn patch<'a>(blocks: &mut [Block<'a>]) -> Result<HashMap<&'a str, u16>, Vec<Stri
         }
 
         let end = *addr + size;
-        let label = block.labels.get(0).unwrap_or(&"Unlabeled");
+        let label = block.labels.first().unwrap_or(&"Unlabeled");
         let region = Region {
             label,
             start: *addr,
