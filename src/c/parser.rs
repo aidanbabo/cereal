@@ -320,9 +320,13 @@ impl<'s> Parser<'s> {
 
         let mut expr = prefix(self)?;
 
-        while let Some(infix) = self.peek().map(|t| Rule::for_type(t.ty)) {
+        while let Some(t) = self.peek() {
+            let infix = Rule::for_type(t.ty);
             if precedence <= infix.precedence {
-                expr = infix.infix.unwrap()(self, expr)?;
+                let Some(fun) = infix.infix else {
+                    return Err(format!("Cannot use {} as an infix operator", t.chars));
+                };
+                expr = fun(self, expr)?;
             } else {
                 break;
             }
@@ -335,7 +339,7 @@ impl<'s> Parser<'s> {
         self.parse_precedence(Precedence::Comma)
     }
 
-    fn return_statement(&mut self, ret: S<'s, Token<'s>>) -> Result<S<'s, Return<'s>>, Error> {
+    fn return_statement(&mut self, ret: S<'s, Token<'s>>) -> Result<Return<'s>, Error> {
         let next = match self.peek() {
             Some(n) => n,
             None => return Err("Expected ';' or an expression, found end of file.".to_string()),
@@ -346,8 +350,11 @@ impl<'s> Parser<'s> {
         };
         let _semicolon = self.next_token_expected("';'")?;
 
-        let return_ = Return { expr: return_value };
-        Ok(return_.spanned(ret.span))
+        let return_ = Return {
+            keyword: ().spanned(ret.span),
+            expr: return_value,
+        };
+        Ok(return_)
     }
 
     fn statement(&mut self) -> Result<Statement<'s>, Error> {

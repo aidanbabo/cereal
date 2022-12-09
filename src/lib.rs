@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Write;
-use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
 pub mod assembler;
@@ -11,72 +10,15 @@ pub mod char_utils;
 pub mod ir;
 pub mod printer;
 pub mod simulator;
+pub mod span;
+
+pub use span::{Span, Spannable, S};
 
 const CODE_HEADER: u16 = 0xCADE;
 const DATA_HEADER: u16 = 0xDADA;
 const SYMBOL_HEADER: u16 = 0xC3B7;
 const FILE_HEADER: u16 = 0xF17E;
 const LINE_HEADER: u16 = 0x715E;
-
-#[derive(Clone, Copy, Debug)]
-pub struct Span<'source> {
-    pub start: usize,
-    pub end: usize,
-    pub line: usize,
-    _phantom: PhantomData<&'source ()>,
-}
-
-impl<'source> Span<'source> {
-    pub fn new(_s: &'source str, start: usize, end: usize, line: usize) -> Self {
-        Span {
-            start,
-            end,
-            line,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Spanned<'source, T> {
-    t: T,
-    pub span: Span<'source>,
-}
-
-impl<'source, T> Spanned<'source, T> {
-    pub fn new(t: T, span: Span<'source>) -> Self {
-        Spanned { t, span }
-    }
-}
-
-trait Spannable<'source> {
-    fn spanned(self, span: Span<'source>) -> Spanned<'source, Self>
-    where
-        Self: Sized;
-}
-
-impl<'source, T> Spannable<'source> for T {
-    fn spanned(self, span: Span<'source>) -> Spanned<'source, T> {
-        Spanned::new(self, span)
-    }
-}
-
-use std::ops;
-impl<'source, T> ops::Deref for Spanned<'source, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.t
-    }
-}
-
-impl<'source, T> ops::DerefMut for Spanned<'source, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.t
-    }
-}
-
-pub type S<'source, T> = Spanned<'source, T>;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Reg {
@@ -582,49 +524,47 @@ fn patch<'a>(blocks: &mut [Block<'a>]) -> Result<HashMap<&'a str, u16>, Vec<Stri
 
     use InstructionType::*;
     for block in blocks {
-        if let BlockType::Code(instructions) = &mut block.ty {
-            let top_addr = block.addr.unwrap() as i32;
-            for (i, instruction) in instructions.iter_mut().enumerate() {
-                if let Some(label) = instruction.label {
-                    instruction.label = None;
-                    if let Some(address) = addresses.get(&label) {
-                        let current = top_addr + i as i32;
-                        match instruction.ty {
-                            Brp | Brz | Brzp | Brn | Brnp | Brnz | Brnzp | Jmp => {
-                                instruction.immediate = (*address) as i32 - current - 1;
-                                if !number_fits(
-                                    instruction.immediate,
-                                    true,
-                                    if matches!(instruction.ty, Jmp) { 11 } else { 9 },
-                                ) {
-                                    errors.push(format!("Jump to label '{}' is too far.", label));
-                                    continue;
-                                }
-                            }
-                            Jsr => {
-                                if address & 0x0f != 0 {
-                                    errors.push(format!(
-                                        "Cannot jump to subroutine of not aligned label '{}'.",
-                                        label
-                                    ));
-                                    continue;
-                                }
-                                let address = address >> 4;
-                                instruction.immediate = address as i32;
-                                if !number_fits(instruction.immediate, true, 11) {
-                                    errors.push(format!("Jump to subroutine to label '{}' is too far. You cannot jump to subroutines in user/os space if you are in os/user space.", label));
-                                    continue;
-                                }
-                            }
-                            Const => instruction.immediate = (*address as i32) & 0x1ff,
-                            Hiconst => instruction.immediate = ((*address as i32) & 0xff00) >> 8,
-                            _ => {}
-                        }
-                    } else {
-                        errors.push(format!("Label '{}' is not defined.", label));
+        let BlockType::Code(instructions) = &mut block.ty else { continue };
+        let top_addr = block.addr.unwrap() as i32;
+        for (i, instruction) in instructions.iter_mut().enumerate() {
+            let Some(label) = instruction.label else { continue };
+            instruction.label = None;
+            let Some(address) = addresses.get(&label) else {
+                errors.push(format!("Label '{}' is not defined.", label));
+                continue;
+            };
+
+            let current = top_addr + i as i32;
+            match instruction.ty {
+                Brp | Brz | Brzp | Brn | Brnp | Brnz | Brnzp | Jmp => {
+                    instruction.immediate = (*address) as i32 - current - 1;
+                    if !number_fits(
+                        instruction.immediate,
+                        true,
+                        if matches!(instruction.ty, Jmp) { 11 } else { 9 },
+                    ) {
+                        errors.push(format!("Jump to label '{}' is too far.", label));
                         continue;
                     }
                 }
+                Jsr => {
+                    if address & 0x0f != 0 {
+                        errors.push(format!(
+                            "Cannot jump to subroutine of not aligned label '{}'.",
+                            label
+                        ));
+                        continue;
+                    }
+                    let address = address >> 4;
+                    instruction.immediate = address as i32;
+                    if !number_fits(instruction.immediate, true, 11) {
+                        errors.push(format!("Jump to subroutine to label '{}' is too far. You cannot jump to subroutines in user/os space if you are in os/user space.", label));
+                        continue;
+                    }
+                }
+                Const => instruction.immediate = (*address as i32) & 0x1ff,
+                Hiconst => instruction.immediate = ((*address as i32) & 0xff00) >> 8,
+                _ => {}
             }
         }
     }

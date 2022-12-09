@@ -342,7 +342,7 @@ impl<'c, 's> CgContext<'c, 's> {
 
     fn generate_statement(&mut self, statement: Statement<'s>) {
         match statement.ty {
-            StatementType::Return(ret) => self.generate_return(ret.t),
+            StatementType::Return(ret) => self.generate_return(ret),
             StatementType::Expression(expr) => self.generate_expression(expr, Location::Nowhere),
         }
     }

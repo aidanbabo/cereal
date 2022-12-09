@@ -85,12 +85,13 @@ pub struct Expression<'s> {
 
 #[derive(Debug)]
 pub struct Return<'s> {
+    pub keyword: S<'s, ()>,
     pub expr: Option<Expression<'s>>,
 }
 
 #[derive(Debug)]
 pub enum StatementType<'s> {
-    Return(S<'s, Return<'s>>),
+    Return(Return<'s>),
     Expression(Expression<'s>),
 }
 
