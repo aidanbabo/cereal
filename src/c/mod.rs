@@ -1,4 +1,4 @@
-use crate::Block;
+use crate::block::Block;
 use std::collections::HashMap;
 use std::path::Path;
 

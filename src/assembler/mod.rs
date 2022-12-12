@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::Block;
+use crate::block::Block;
 
 mod lexer;
 mod parser;

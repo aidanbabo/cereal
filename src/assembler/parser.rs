@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 
 use super::lexer::{DirectiveType, Identifier, LiteralType, Token, TokenType};
-use crate::{instruction_operands, number_fits};
-use crate::{Block, BlockType, Data, InstructionType, InstructionWithLabel, Operand, Reg};
+use crate::asm_instruction::{
+    instruction_operands, InstructionType, InstructionWithLabel, Operand, Reg,
+};
+use crate::block::{Block, BlockType, Data};
+use crate::number_fits;
 
 #[derive(PartialEq)]
 enum Section {

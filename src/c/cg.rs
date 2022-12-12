@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
+use crate::asm_instruction::{insn, InstructionWithLabel};
+use crate::block::{Block, BlockType, Data};
 use crate::c::ast::*;
-use crate::insn;
-use crate::{Block, BlockType, Data, InstructionWithLabel};
 
 pub fn generate<'c, 's>(
     ast: Vec<TopLevel<'s>>,

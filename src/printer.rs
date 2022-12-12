@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::io::{self, Write};
 
-use crate::instruction_operands;
-use crate::{Block, BlockType, Data, InstructionWithLabel, Operand, Reg};
+use crate::asm_instruction::{instruction_operands, InstructionWithLabel, Operand, Reg};
+use crate::block::{Block, BlockType, Data};
 
 fn write_instruction(writer: &mut dyn Write, instruction: &InstructionWithLabel) -> io::Result<()> {
     write!(writer, "\t{}", instruction.ty)?;
@@ -107,7 +107,7 @@ fn write_block(
     Ok(())
 }
 
-pub fn write_blocks(
+pub(crate) fn write_blocks(
     writer: &mut dyn Write,
     blocks: &[Block],
     constants: &HashMap<&str, i32>,
@@ -122,6 +122,7 @@ pub fn write_blocks(
     Ok(())
 }
 
-pub fn print_blocks(blocks: &[Block], constants: &HashMap<&str, i32>) -> io::Result<()> {
+#[allow(dead_code)]
+pub(crate) fn print_blocks(blocks: &[Block], constants: &HashMap<&str, i32>) -> io::Result<()> {
     write_blocks(&mut io::stdout().lock(), blocks, constants)
 }
