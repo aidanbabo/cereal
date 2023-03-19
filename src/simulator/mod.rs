@@ -719,12 +719,16 @@ use eframe::egui;
 
 struct CerealApp {
     machine: Machine,
+    command: String,
+    command_output: String,
 }
 
 impl CerealApp {
     fn new(machine: Machine) -> Self {
         CerealApp {
             machine,
+            command: String::new(),
+            command_output: String::new(),
         }
     }
 }
@@ -732,7 +736,19 @@ impl CerealApp {
 impl eframe::App for CerealApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.label("Cereal Sim");
+            ui.ctx().request_repaint();
+
+            ui.label("Command");
+            let response = ui.text_edit_singleline(&mut self.command);
+            if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                self.command_output.push_str(&self.command);
+                self.command_output.push('\n');
+                response.request_focus();
+            }
+            egui::ScrollArea::vertical().max_height(100.0).show(ui, |ui| {
+                ui.text_edit_multiline(&mut &*self.command_output);
+            });
+
 
             fn unpack(b: u16, s: u8) -> u8 {
                 ((b >> s) as u8 & (((1 << 5) - 1))) << 3
@@ -764,7 +780,6 @@ impl eframe::App for CerealApp {
                     break;
                 }
                 self.machine.step(&mut None).unwrap();
-                ctx.request_repaint();
             }
         });
     }
@@ -795,7 +810,7 @@ pub fn run(options: Options) -> i16 {
 
     if !options.headless {
         let options = eframe::NativeOptions {
-            initial_window_size: Some(egui::vec2(640.0, 480.0)),
+            initial_window_size: Some(egui::vec2(1040.0, 860.0)),
             ..Default::default()
         };
         eframe::run_native(
