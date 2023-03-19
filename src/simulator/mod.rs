@@ -394,6 +394,15 @@ impl Machine {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.registers = [0; 8];
+        for cell in self.memory.iter_mut() {
+            *cell = 0;
+        }
+        self.pc = 0x8200;
+        self.psr = OS_MODE | N;
+    }
+
     pub fn pc(&self) -> u16 {
         self.pc
     }
@@ -791,9 +800,9 @@ impl CerealApp {
                 });
                 ui.horizontal(|ui| {
                     ui.label("CC");
-                    if self.machine.psr & 1 > 0 {
+                    if self.machine.psr & P > 0 {
                         ui.label("P");
-                    } else if self.machine.psr & 4 > 0 {
+                    } else if self.machine.psr & N > 0 {
                         ui.label("N");
                     } else {
                         ui.label("Z");
@@ -866,13 +875,6 @@ impl eframe::App for CerealApp {
                     self.memory(ui);
                 });
             });
-
-            for _ in 0..500 {
-                if self.machine.pc() == 0x80FF {
-                    break;
-                }
-                self.machine.step(&mut None).unwrap();
-            }
         });
     }
 }
@@ -910,7 +912,8 @@ pub fn run(options: Options) -> i16 {
             options,
             Box::new(|_cc| Box::new(CerealApp::new(machine))),
         ).unwrap();
-        panic!("yeehaw");
+
+        0
     } else {
         let mut steps = 0;
         while machine.pc() != 0x80ff {
@@ -934,7 +937,8 @@ pub fn run(options: Options) -> i16 {
                     .expect("Failed to write to a file");
             }
         }
+
+        machine.registers[0]
     }
 
-    machine.registers[0]
 }

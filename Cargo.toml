@@ -9,6 +9,7 @@ default-run = "simulator"
 [dependencies]
 clap = { version = "3.1.18", features = ["derive"] }
 eframe = "0.21.3"
+once_cell = "1.17.1"
 
 [[bin]]
 name = "compiler"
