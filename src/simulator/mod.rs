@@ -756,13 +756,10 @@ impl CerealApp {
         ui.label("registers");
     }
 
-    fn io(&mut self, ui: &mut egui::Ui) {
+    fn devices(&mut self, ui: &mut egui::Ui) {
         fn unpack(b: u16, s: u8) -> u8 {
             ((b >> s) as u8 & (((1 << 5) - 1))) << 3
         }
-        // assert_eq!(unpack(0x8000, 11, 5), 0x80);
-        // assert_eq!(unpack(0x0400, 5, 6), 0x80);
-        // assert_eq!(unpack(0x0010, 0, 5), 0x80);
 
         let memory_start = 0xC000;
         let memory_end = 0xFDFF;
@@ -781,6 +778,29 @@ impl CerealApp {
         let texture = ui.ctx().load_texture("Display", image_data, egui::TextureOptions::NEAREST);
         ui.image(&texture, [128.0 * 2.0, 124.0 * 2.0]);
     }
+
+    fn memory(&mut self, ui: &mut egui::Ui) {
+        ui.label("Memory");
+
+        let scroll_area = egui::ScrollArea::vertical()
+            .max_height(400.0)
+            .max_width(300.0)
+            .auto_shrink([false; 2])
+            .always_show_scroll(true);
+
+        let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
+        scroll_area.show_rows(ui, row_height, u16::MAX as usize + 1, |ui, row_range| {
+            ui.set_height(400.0);
+            for row in row_range {
+                let text = if row > 0xfdff {
+                    format!("Address: x{:04X} Value ???", row)
+                } else {
+                    format!("Address: x{:04X} Value {}", row, self.machine.memory[row])
+                };
+                ui.label(text);
+            }
+        });
+    }
 }
 
 impl eframe::App for CerealApp {
@@ -793,9 +813,11 @@ impl eframe::App for CerealApp {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     self.registers(ui);
-                    self.io(ui);
+                    self.devices(ui);
                 });
-                ui.label("Memory");
+                ui.vertical(|ui| {
+                    self.memory(ui);
+                });
             });
 
             for _ in 0..500 {
