@@ -733,47 +733,70 @@ impl CerealApp {
     }
 }
 
+impl CerealApp {
+    fn command(&mut self, ui: &mut egui::Ui) {
+        ui.label("Command");
+        let mut output = egui::TextEdit::singleline(&mut self.command).show(ui);
+        if output.response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            self.command_output.push_str(&self.command);
+            self.command_output.push('\n');
+            output.response.request_focus();
+            use egui::widgets::text_edit::CCursorRange;
+            use egui::text::CCursor;
+            output.state.set_ccursor_range(Some(CCursorRange::two(CCursor::new(0), CCursor::new(self.command.chars().count()))));
+            output.state.store(ui.ctx(), output.response.id);
+        }
+        egui::ScrollArea::vertical().max_height(100.0).show(ui, |ui| {
+            ui.set_height(100.0);
+            ui.text_edit_multiline(&mut &*self.command_output);
+        });
+    }
+
+    fn registers(&mut self, ui: &mut egui::Ui) {
+        ui.label("registers");
+    }
+
+    fn io(&mut self, ui: &mut egui::Ui) {
+        fn unpack(b: u16, s: u8) -> u8 {
+            ((b >> s) as u8 & (((1 << 5) - 1))) << 3
+        }
+        // assert_eq!(unpack(0x8000, 11, 5), 0x80);
+        // assert_eq!(unpack(0x0400, 5, 6), 0x80);
+        // assert_eq!(unpack(0x0010, 0, 5), 0x80);
+
+        let memory_start = 0xC000;
+        let memory_end = 0xFDFF;
+        let mut pixel_data = Vec::with_capacity(128 * 124);
+        for addr in memory_start..memory_end+1 {
+            let data = self.machine.memory[addr];
+            let color = egui::Color32::from_rgb(unpack(data, 10), unpack(data, 5), unpack(data, 0));
+            pixel_data.push(color);
+        }
+
+        let image_data = egui::ImageData::Color(egui::ColorImage {
+            size: [128, 124], 
+            pixels: pixel_data,
+        });
+
+        let texture = ui.ctx().load_texture("Display", image_data, egui::TextureOptions::NEAREST);
+        ui.image(&texture, [128.0 * 2.0, 124.0 * 2.0]);
+    }
+}
+
 impl eframe::App for CerealApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.ctx().request_repaint();
 
-            ui.label("Command");
-            let response = ui.text_edit_singleline(&mut self.command);
-            if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                self.command_output.push_str(&self.command);
-                self.command_output.push('\n');
-                response.request_focus();
-            }
-            egui::ScrollArea::vertical().max_height(100.0).show(ui, |ui| {
-                ui.text_edit_multiline(&mut &*self.command_output);
+            self.command(ui);
+
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    self.registers(ui);
+                    self.io(ui);
+                });
+                ui.label("Memory");
             });
-
-
-            fn unpack(b: u16, s: u8) -> u8 {
-                ((b >> s) as u8 & (((1 << 5) - 1))) << 3
-            }
-
-            // assert_eq!(unpack(0x8000, 11, 5), 0x80);
-            // assert_eq!(unpack(0x0400, 5, 6), 0x80);
-            // assert_eq!(unpack(0x0010, 0, 5), 0x80);
-
-            let memory_start = 0xC000;
-            let memory_end = 0xFDFF;
-            let mut pixel_data = Vec::with_capacity(128 * 124);
-            for addr in memory_start..memory_end+1 {
-                let data = self.machine.memory[addr];
-                let color = egui::Color32::from_rgb(unpack(data, 10), unpack(data, 5), unpack(data, 0));
-                pixel_data.push(color);
-            }
-
-            let image_data = egui::ImageData::Color(egui::ColorImage {
-                size: [128, 124], 
-                pixels: pixel_data,
-            });
-
-            let texture = ctx.load_texture("Display", image_data, egui::TextureOptions::NEAREST);
-            ui.image(&texture, [128.0 * 4.0, 124.0 * 4.0]);
 
             for _ in 0..500 {
                 if self.machine.pc() == 0x80FF {
