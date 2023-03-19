@@ -47,6 +47,7 @@ fn _simple_compiler_test(input: &[&str], output: &str) -> i16 {
         input_paths: vec![output.into()],
         step_cap: Some(5000),
         loader_trace: false,
+        headless: true,
     };
 
     run(options)

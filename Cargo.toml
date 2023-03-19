@@ -8,6 +8,7 @@ default-run = "compiler"
 
 [dependencies]
 clap = { version = "3.1.18", features = ["derive"] }
+eframe = "0.21.3"
 
 [[bin]]
 name = "compiler"

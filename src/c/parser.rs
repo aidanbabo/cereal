@@ -282,22 +282,24 @@ impl<'s> Parser<'s> {
 
     fn call(&mut self, procedure: Expression<'s>) -> Result<Expression<'s>, Error> {
         assert_eq!(self.consume().unwrap().ty, TokenType::LeftParen);
-        let args = {
-            let mut args = Vec::new();
-            while self
-                .peek()
-                .filter(|p| p.ty != TokenType::RightParen)
-                .is_some()
-            {
-                let expr = self.parse_precedence(Precedence::Assignment)?;
-                args.push(expr);
-                // @Todo allows trailing comma
+
+        let mut args = Vec::new();
+        while self
+            .peek()
+            .filter(|p| p.ty != TokenType::RightParen)
+            .is_some()
+        {
+            if !args.is_empty() {
                 if self.peek().filter(|p| p.ty == TokenType::Comma).is_some() {
                     self.consume().unwrap();
+                } else {
+                    return Err("Expected comma after argument".to_string());
                 }
             }
-            args
-        };
+
+            let expr = self.parse_precedence(Precedence::Assignment)?;
+            args.push(expr);
+        }
 
         self.next_token_expected_of_type("')'", TokenType::RightParen)?;
 
@@ -430,26 +432,28 @@ impl<'s> Parser<'s> {
     ) -> Result<Procedure<'s>, Error> {
         self.next_token_expected_of_type("'('", TokenType::LeftParen)?;
 
-        let params = {
-            let mut params = Vec::new();
-            while self.peek().filter(|p| p.ty == TokenType::Int).is_some() {
-                let int = self.consume().unwrap();
-                let parameter =
-                    self.next_token_expected_of_type("identifier", TokenType::Identifier)?;
-                params.push((
-                    Type::Int.spanned(int.span),
-                    parameter.chars.spanned(parameter.span),
-                ));
-
-                // @Todo allows trailing commas
+        let mut params = Vec::new();
+        while self
+            .peek()
+            .filter(|p| p.ty != TokenType::RightParen)
+            .is_some()
+        {
+            if !params.is_empty() {
                 if self.peek().filter(|t| t.ty == TokenType::Comma).is_some() {
                     self.consume().unwrap();
                 } else {
-                    break;
+                    return Err("expected comma after parameter name".to_string());
                 }
             }
-            params
-        };
+
+            let int = self.next_token_expected_of_type("'int'", TokenType::Int)?;
+            let parameter =
+                self.next_token_expected_of_type("identifier", TokenType::Identifier)?;
+            params.push((
+                Type::Int.spanned(int.span),
+                parameter.chars.spanned(parameter.span),
+            ));
+        }
 
         self.next_token_expected_of_type("')'", TokenType::RightParen)?;
         self.next_token_expected_of_type("'{'", TokenType::LeftBrace)?;

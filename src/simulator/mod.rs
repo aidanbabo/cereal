@@ -1,5 +1,5 @@
-pub mod decode;
-pub mod loader;
+mod decode;
+mod loader;
 
 use std::io::{self, Write};
 
@@ -383,9 +383,7 @@ impl Machine {
         let memory = {
             let vec = vec![0; MEMORY_SIZE];
             let boxed_slice: Box<[u16]> = vec.into_boxed_slice();
-            let ptr = Box::into_raw(boxed_slice) as *mut [u16; MEMORY_SIZE];
-            // Is it worth having unsave to save a single usize on the Machine ?
-            unsafe { Box::from_raw(ptr) }
+            boxed_slice.try_into().unwrap()
         };
         Machine {
             pc: 0x8200,
@@ -714,6 +712,62 @@ pub struct Options {
     pub input_paths: Vec<PathBuf>,
     pub step_cap: Option<u64>,
     pub loader_trace: bool,
+    pub headless: bool,
+}
+
+use eframe::egui;
+
+struct CerealApp {
+    machine: Machine,
+}
+
+impl CerealApp {
+    fn new(machine: Machine) -> Self {
+        CerealApp {
+            machine,
+        }
+    }
+}
+
+impl eframe::App for CerealApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.label("Cereal Sim");
+
+            fn unpack(b: u16, s: u8) -> u8 {
+                ((b >> s) as u8 & (((1 << 5) - 1))) << 3
+            }
+
+            // assert_eq!(unpack(0x8000, 11, 5), 0x80);
+            // assert_eq!(unpack(0x0400, 5, 6), 0x80);
+            // assert_eq!(unpack(0x0010, 0, 5), 0x80);
+
+            let memory_start = 0xC000;
+            let memory_end = 0xFDFF;
+            let mut pixel_data = Vec::with_capacity(128 * 124);
+            for addr in memory_start..memory_end+1 {
+                let data = self.machine.memory[addr];
+                let color = egui::Color32::from_rgb(unpack(data, 10), unpack(data, 5), unpack(data, 0));
+                pixel_data.push(color);
+            }
+
+            let image_data = egui::ImageData::Color(egui::ColorImage {
+                size: [128, 124], 
+                pixels: pixel_data,
+            });
+
+            let texture = ctx.load_texture("Display", image_data, egui::TextureOptions::NEAREST);
+            ui.image(&texture, [128.0 * 4.0, 124.0 * 4.0]);
+
+            for _ in 0..500 {
+                if self.machine.pc() == 0x80FF {
+                    break;
+                }
+                self.machine.step(&mut None).unwrap();
+                ctx.request_repaint();
+            }
+        });
+    }
 }
 
 // @Todo keep the machine around after an error
@@ -739,26 +793,39 @@ pub fn run(options: Options) -> i16 {
         std::io::BufWriter::new(file)
     });
 
-    let mut steps = 0;
-    while machine.pc() != 0x80ff {
-        steps += 1;
-        match options.step_cap {
-            Some(cap) if steps > cap => panic!("exceeded step limit"),
-            _ => {}
-        }
-
-        let mut trace = options.trace_path.as_ref().map(|_| Trace::new());
-        match machine.step(&mut trace) {
-            Ok(()) => {}
-            Err(e) => {
-                eprintln!("Error: {:?}", e);
-                break;
+    if !options.headless {
+        let options = eframe::NativeOptions {
+            initial_window_size: Some(egui::vec2(640.0, 480.0)),
+            ..Default::default()
+        };
+        eframe::run_native(
+            "Cereal Sim",
+            options,
+            Box::new(|_cc| Box::new(CerealApp::new(machine))),
+        ).unwrap();
+        panic!("yeehaw");
+    } else {
+        let mut steps = 0;
+        while machine.pc() != 0x80ff {
+            steps += 1;
+            match options.step_cap {
+                Some(cap) if steps > cap => panic!("exceeded step limit"),
+                _ => {}
             }
-        }
-        if let Some(trace) = trace {
-            trace
-                .write_to_file(trace_file.as_mut().unwrap())
-                .expect("Failed to write to a file");
+
+            let mut trace = options.trace_path.as_ref().map(|_| Trace::new());
+            match machine.step(&mut trace) {
+                Ok(()) => {}
+                Err(e) => {
+                    eprintln!("Error: {:?}", e);
+                    break;
+                }
+            }
+            if let Some(trace) = trace {
+                trace
+                    .write_to_file(trace_file.as_mut().unwrap())
+                    .expect("Failed to write to a file");
+            }
         }
     }
 
