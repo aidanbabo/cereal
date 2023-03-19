@@ -1,3 +1,4 @@
+mod command;
 mod decode;
 mod loader;
 
@@ -717,7 +718,7 @@ pub struct Options {
 
 use eframe::egui;
 
-struct CerealApp {
+pub(crate) struct CerealApp {
     machine: Machine,
     command: String,
     command_output: String,
@@ -736,24 +737,70 @@ impl CerealApp {
 impl CerealApp {
     fn command(&mut self, ui: &mut egui::Ui) {
         ui.label("Command");
-        let mut output = egui::TextEdit::singleline(&mut self.command).show(ui);
+        let mut output = egui::TextEdit::singleline(&mut self.command).desired_width(f32::INFINITY).show(ui);
         if output.response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            self.command_output.push_str(&self.command);
-            self.command_output.push('\n');
-            output.response.request_focus();
             use egui::widgets::text_edit::CCursorRange;
             use egui::text::CCursor;
+
+            command::command(self);
+            output.response.request_focus();
             output.state.set_ccursor_range(Some(CCursorRange::two(CCursor::new(0), CCursor::new(self.command.chars().count()))));
             output.state.store(ui.ctx(), output.response.id);
         }
-        egui::ScrollArea::vertical().max_height(100.0).show(ui, |ui| {
+        let scroll_area = egui::ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .max_height(100.0)
+            .stick_to_bottom(true);
+        scroll_area.show(ui, |ui| {
             ui.set_height(100.0);
-            ui.text_edit_multiline(&mut &*self.command_output);
+            egui::TextEdit::multiline(&mut &*self.command_output).desired_width(f32::INFINITY).show(ui);
         });
     }
 
     fn registers(&mut self, ui: &mut egui::Ui) {
-        ui.label("registers");
+
+        let register = |ui: &mut egui::Ui, i| ui.horizontal(|ui| {
+            ui.label(format!("R{i}"));
+            ui.label(&format!("x{:04X}", self.machine.registers[i])); 
+        });
+
+        ui.label("Registers");
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                register(ui, 0);
+                register(ui, 1);
+                register(ui, 2);
+                register(ui, 3);
+                register(ui, 4);
+                register(ui, 5);
+            });
+            ui.vertical(|ui| {
+                register(ui, 6);
+                register(ui, 7);
+                ui.horizontal(|ui| {
+                    ui.label("PC");
+                    ui.label(&format!("x{:04X}", self.machine.pc)); 
+                });
+                ui.horizontal(|ui| {
+                    ui.label("");
+                    ui.label("");
+                });
+                ui.horizontal(|ui| {
+                    ui.label("PSR");
+                    ui.label(&format!("x{:04X}", self.machine.psr)); 
+                });
+                ui.horizontal(|ui| {
+                    ui.label("CC");
+                    if self.machine.psr & 1 > 0 {
+                        ui.label("P");
+                    } else if self.machine.psr & 4 > 0 {
+                        ui.label("N");
+                    } else {
+                        ui.label("Z");
+                    }
+                });
+            });
+        });
     }
 
     fn devices(&mut self, ui: &mut egui::Ui) {

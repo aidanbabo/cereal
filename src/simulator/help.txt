@@ -1,0 +1,23 @@
+as usage: as <outfilename> <infilename>+
+b[reak] usage: b[reak] [ set | clear ] [ mem_addr | label ]
+bpred usage: bpred <size>
+c[ontinue] usage: c[ontinue]
+check usage: check [ count | cumulative | reset | PC | reg | PSR | MPR | mem_addr | label | N | Z | P ] [ mem_addr | label ] [ value | label ]
+clear usage: clear
+counters usage: counters
+d[ump] usage: d[ump] [-check | -coe | -readmemh | -disasm] from_mem_addr to_mem_addr dumpfile
+goto usage: goto [<addr>|<label>]
+h[elp] usage: h[elp] [command]
+input usage: input <filename>
+l[ist] usage: l[ist] [ addr1 | label1 [addr2 | label2] ]
+l[oa]d usage: l[oa]d <filename>
+loadhex usage: loadhex hexfile
+n[ext] usage: n[ext]
+p[rint] usage: p[rint]
+quit usage: quit
+reset usage: reset
+s[tep] usage: s[tep]
+script usage: script <filename>
+set usage: set [ PC | reg | PSR | MPR | mem_addr | label ] [ mem_addr | label ] [ value | N | Z | P ]
+stop usage: stop
+trace usage: trace [on <trace-file> | off]
