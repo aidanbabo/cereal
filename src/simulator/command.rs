@@ -40,7 +40,10 @@ pub(crate) fn command(app: &mut CerealApp) {
                 app.command_output.push('\n');
             }
         }
-        "as" => app.command_output.push_str("Unimplemented\n"),
+        "as" => {
+            let output = assemble(words);
+            app.command_output.push_str(&*output);
+        }
         "b" | "break" => app.command_output.push_str("Unimplemented\n"),
         "bpred" => app.command_output.push_str("Unimplemented\n"),
         "c" | "continue" => app.command_output.push_str("Unimplemented\n"),
@@ -79,6 +82,25 @@ pub(crate) fn command(app: &mut CerealApp) {
             app.command_output.push_str(unknown);
             app.command_output.push('\n');
         }
+    }
+}
+
+fn assemble<'a>(mut words: impl Iterator<Item = &'a str>) -> String {
+    let Some(mut output_path) = words.next().map(String::from) else { return HELP_MESSAGES["as"].to_string(); };
+    output_path.push_str(".obj");
+    let input_paths = words.map(|f| format!("{f}.asm").into()).collect::<Vec<_>>();
+    if input_paths.is_empty() {
+        return HELP_MESSAGES["as"].to_string();
+    }
+
+    let options = crate::Options {
+        input_paths,
+        output_path: output_path.into(),
+        debug_info: true,
+    };
+    match crate::compile(options) {
+        Ok(()) => "Assembly completed without errors or warnings\n".to_string(),
+        Err(()) => "Assemble error\n".to_string(),
     }
 }
 
