@@ -195,7 +195,7 @@ impl<'a, 'b> Parser<'a, 'b> {
 
                     let val = match num.ty {
                         TokenType::Identifier(Identifier::Hex(val)) => val as i16,
-                        TokenType::Literal(LiteralType::Signed(val)) => val as i16,
+                        TokenType::Literal(LiteralType::Signed(val)) => val,
                         TokenType::Literal(LiteralType::Unsigned(val)) => {
                             if val as i32 > i16::MAX as i32 {
                                 return Err(format!("Literal '{}' after .fill directive is too big to fit in a signed 16-bit number.", num.chars));

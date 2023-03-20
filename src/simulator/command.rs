@@ -42,7 +42,7 @@ pub(crate) fn command(app: &mut CerealApp) {
         }
         "as" => {
             let output = assemble(words);
-            app.command_output.push_str(&*output);
+            app.command_output.push_str(&output);
         }
         "b" | "break" => {
             let Some(kind) = words.next() else {
@@ -75,12 +75,13 @@ pub(crate) fn command(app: &mut CerealApp) {
 
             let verb = match kind {
                 Kind::Set => {
-                    if app.breakpoints.contains_key(&addr) {
+                    use std::collections::btree_map::Entry;
+                    if let Entry::Vacant(e) = app.breakpoints.entry(addr) {
+                        e.insert(label.to_string());
+                        "set"
+                    } else {
                         app.breakpoints.remove(&addr);
                         "removed"
-                    } else {
-                        app.breakpoints.insert(addr, label.to_string());
-                        "set"
                     }
                 }
                 Kind::Clear => {
@@ -88,7 +89,7 @@ pub(crate) fn command(app: &mut CerealApp) {
                     "cleared"
                 }
             };
-            app.command_output.push_str(&*format!("Breakpoint {verb} at x{addr:04X}\n"));
+            app.command_output.push_str(&format!("Breakpoint {verb} at x{addr:04X}\n"));
         },
         "bpred" => app.command_output.push_str("Unimplemented\n"),
         "c" | "continue" => app.command_output.push_str("Unimplemented\n"),
@@ -102,7 +103,7 @@ pub(crate) fn command(app: &mut CerealApp) {
         "ld" | "load" => {
             if let Some(filename) = words.next() {
                 let output = load_from_filename(filename, &mut app.machine);
-                app.command_output.push_str(&*output);
+                app.command_output.push_str(&output);
                 app.command_output.push('\n');
             } else {
                 app.command_output.push_str(HELP_MESSAGES["ld"]);

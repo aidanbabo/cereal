@@ -253,7 +253,7 @@ impl std::fmt::Display for Instruction {
                 self.ty.to_mnemonic(),
                 self.rd,
                 self.rs,
-                self.immediate as i16 as u16
+                self.immediate as u16
             ),
             InstructionType::Sll => write!(
                 f,
@@ -772,12 +772,10 @@ impl CerealApp {
                 if *ci != 0 {
                     *ci -= 1;
                 }
+            } else if self.command_history.is_empty() {
+                self.command_index = None;
             } else {
-                if self.command_history.is_empty() {
-                    self.command_index = None;
-                } else {
-                    self.command_index = Some(self.command_history.len() - 1);
-                }
+                self.command_index = Some(self.command_history.len() - 1);
             }
             modified = true;
         } else {
@@ -860,7 +858,7 @@ impl CerealApp {
 
     fn devices(&mut self, ui: &mut egui::Ui) {
         fn unpack(b: u16, s: u8) -> u8 {
-            ((b >> s) as u8 & (((1 << 5) - 1))) << 3
+            ((b >> s) as u8 & ((1 << 5) - 1)) << 3
         }
 
         let memory_start = 0xC000;
