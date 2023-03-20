@@ -44,7 +44,52 @@ pub(crate) fn command(app: &mut CerealApp) {
             let output = assemble(words);
             app.command_output.push_str(&*output);
         }
-        "b" | "break" => app.command_output.push_str("Unimplemented\n"),
+        "b" | "break" => {
+            let Some(kind) = words.next() else {
+                app.command_output.push_str(HELP_MESSAGES["b"]);
+                app.command_output.push('\n');
+                return;
+            };
+
+            enum Kind { Set, Clear }
+
+            let kind = match &*kind.to_lowercase() {
+                "set" => Kind::Set,
+                "clear" => Kind::Clear,
+                _ => {
+                    app.command_output.push_str(HELP_MESSAGES["b"]);
+                    app.command_output.push('\n');
+                    return;
+                }
+            };
+
+            let Some(label) = words.next() else { 
+                app.command_output.push_str(HELP_MESSAGES["b"]);
+                return;
+            };
+
+            let Some(&addr) = app.machine.symbols.get(label) else {
+                app.command_output.push_str(&format!("Error: Invalid label ('{}')\n", label));
+                return;
+            };
+
+            let verb = match kind {
+                Kind::Set => {
+                    if app.breakpoints.contains_key(&addr) {
+                        app.breakpoints.remove(&addr);
+                        "removed"
+                    } else {
+                        app.breakpoints.insert(addr, label.to_string());
+                        "set"
+                    }
+                }
+                Kind::Clear => {
+                    app.breakpoints.remove(&addr);
+                    "cleared"
+                }
+            };
+            app.command_output.push_str(&*format!("Breakpoint {verb} at x{addr:04X}\n"));
+        },
         "bpred" => app.command_output.push_str("Unimplemented\n"),
         "c" | "continue" => app.command_output.push_str("Unimplemented\n"),
         "check" => app.command_output.push_str("Unimplemented\n"),
@@ -70,6 +115,7 @@ pub(crate) fn command(app: &mut CerealApp) {
         "quit" => app.command_output.push_str("Unimplemented\n"),
         "reset" => {
             app.machine.reset();
+            app.breakpoints.clear();
             app.command_output.push_str("System reset\n");
         },
         "s" | "step" => app.command_output.push_str("Unimplemented\n"),

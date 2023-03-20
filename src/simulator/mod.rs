@@ -1,3 +1,5 @@
+use std::collections::{BTreeMap, HashMap};
+
 mod command;
 mod decode;
 mod loader;
@@ -377,6 +379,7 @@ struct Machine {
     psr: u16,
     registers: [i16; 8],
     memory: Box<[u16; MEMORY_SIZE]>,
+    symbols: HashMap<String, u16>,
 }
 
 impl Machine {
@@ -391,6 +394,7 @@ impl Machine {
             psr: OS_MODE | N,
             registers: [0; 8],
             memory,
+            symbols: Default::default(),
         }
     }
 
@@ -730,7 +734,10 @@ use eframe::egui;
 pub(crate) struct CerealApp {
     machine: Machine,
     command: String,
+    command_index: Option<usize>,
+    command_history: Vec<String>,
     command_output: String,
+    breakpoints: BTreeMap<u16, String>,
 }
 
 impl CerealApp {
@@ -738,7 +745,10 @@ impl CerealApp {
         CerealApp {
             machine,
             command: String::new(),
+            command_index: None,
+            command_history: Default::default(),
             command_output: String::new(),
+            breakpoints: Default::default(),
         }
     }
 }
@@ -746,16 +756,52 @@ impl CerealApp {
 impl CerealApp {
     fn command(&mut self, ui: &mut egui::Ui) {
         ui.label("Command");
+        
+
+        let modified: bool;
+        if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+            if let Some(ci) = &mut self.command_index {
+                *ci += 1;
+                if *ci >= self.command_history.len() {
+                    self.command_index = None;
+                }
+            }
+            modified = true;
+        } else if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+            if let Some(ci) = &mut self.command_index {
+                if *ci != 0 {
+                    *ci -= 1;
+                }
+            } else {
+                if self.command_history.is_empty() {
+                    self.command_index = None;
+                } else {
+                    self.command_index = Some(self.command_history.len() - 1);
+                }
+            }
+            modified = true;
+        } else {
+            modified = false;
+        }
+
+        if modified {
+            self.command = self.command_index
+                .map(|ci| self.command_history[ci].clone())
+                .unwrap_or(String::new())
+        }
+
         let mut output = egui::TextEdit::singleline(&mut self.command).desired_width(f32::INFINITY).show(ui);
         if output.response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             use egui::widgets::text_edit::CCursorRange;
             use egui::text::CCursor;
 
+            self.command_history.push(self.command.to_string());
             command::command(self);
             output.response.request_focus();
             output.state.set_ccursor_range(Some(CCursorRange::two(CCursor::new(0), CCursor::new(self.command.chars().count()))));
             output.state.store(ui.ctx(), output.response.id);
         }
+        
         let scroll_area = egui::ScrollArea::vertical()
             .auto_shrink([false; 2])
             .max_height(100.0)
@@ -844,7 +890,7 @@ impl CerealApp {
             .auto_shrink([false; 2])
             .always_show_scroll(true);
 
-        let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
+        let row_height = ui.text_style_height(&egui::TextStyle::Body);
         scroll_area.show_rows(ui, row_height, u16::MAX as usize + 1, |ui, row_range| {
             ui.set_height(400.0);
             for row in row_range {
@@ -852,6 +898,30 @@ impl CerealApp {
                     format!("Address: x{:04X} Value ???", row)
                 } else {
                     format!("Address: x{:04X} Value {}", row, self.machine.memory[row])
+                };
+                ui.label(text);
+            }
+        });
+    }
+
+    fn show_breakpoints(&mut self, ui: &mut egui::Ui) {
+        ui.label("Breakpoints");
+
+        let scroll_area = egui::ScrollArea::vertical()
+            .max_height(200.0)
+            .max_width(300.0)
+            .auto_shrink([false; 2])
+            .always_show_scroll(true);
+
+        let row_height = ui.text_style_height(&egui::TextStyle::Body);
+        scroll_area.show_rows(ui, row_height, self.breakpoints.len(), |ui, row_range| {
+            ui.set_height(400.0);
+            let iter = self.breakpoints.iter().skip(row_range.start).take(row_range.end - row_range.start);
+            for (&addr, label) in iter {
+                let text = if addr > 0xfdff {
+                    format!("x{:04X} ({}) Value ???", addr, label)
+                } else {
+                    format!("x{:04X} ({}) Value {}", addr, label, self.machine.memory[addr as usize])
                 };
                 ui.label(text);
             }
@@ -867,12 +937,21 @@ impl eframe::App for CerealApp {
             self.command(ui);
 
             ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    self.registers(ui);
-                    self.devices(ui);
+                ui.push_id("Registers and Device", |ui| {
+                    ui.vertical(|ui| {
+                        self.registers(ui);
+                        self.devices(ui);
+                    });
                 });
-                ui.vertical(|ui| {
-                    self.memory(ui);
+                ui.push_id("Memory", |ui| {
+                    ui.vertical(|ui| {
+                        self.memory(ui);
+                    });
+                });
+                ui.push_id("Breakpoints and Dumps", |ui| {
+                    ui.vertical(|ui| {
+                        self.show_breakpoints(ui);
+                    });
                 });
             });
         });

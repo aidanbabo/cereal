@@ -149,6 +149,7 @@ pub(super) fn load(
                 let addr = reader.read_word()?;
                 let nbytes = reader.read_word()?;
                 let symbol_name = reader.read_str(nbytes)?;
+                machine.symbols.insert(symbol_name.to_string(), addr);
                 // label addresses are only used for printing
                 if trace.is_some() {
                     label_addresses
