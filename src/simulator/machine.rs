@@ -37,8 +37,8 @@ pub struct Machine {
     pub symbols: HashMap<String, u16>,
 }
 
-impl Machine {
-    pub fn new() -> Self {
+impl Default for Machine {
+    fn default() -> Self {
         let memory = {
             let vec = vec![0; MEMORY_SIZE];
             let boxed_slice: Box<[u16]> = vec.into_boxed_slice();
@@ -51,6 +51,13 @@ impl Machine {
             memory,
             symbols: Default::default(),
         }
+    }
+}
+
+impl Machine {
+
+    pub fn new() -> Self {
+        Default::default()
     }
 
     pub fn reset(&mut self) {

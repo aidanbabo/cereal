@@ -53,6 +53,7 @@ fn asm_trace_test(names: &[&str]) {
         step_cap: Some(expected.lines().count() as u64),
         loader_trace: false,
         headless: true,
+        from_directory: None,
     };
 
     run(options);

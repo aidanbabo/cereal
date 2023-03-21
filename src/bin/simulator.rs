@@ -12,6 +12,8 @@ struct Args {
     trace_path: Option<PathBuf>,
     #[clap(long)]
     headless: bool,
+    #[clap(long)]
+    from_directory: Option<PathBuf>,
 }
 
 fn main() {
@@ -22,6 +24,7 @@ fn main() {
         step_cap: None,
         loader_trace: args.loader_trace,
         headless: args.headless,
+        from_directory: args.from_directory,
     };
     run(options);
 }

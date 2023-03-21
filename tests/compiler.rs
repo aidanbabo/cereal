@@ -48,6 +48,7 @@ fn _simple_compiler_test(input: &[&str], output: &str) -> i16 {
         step_cap: Some(5000),
         loader_trace: false,
         headless: true,
+        from_directory: None,
     };
 
     run(options)

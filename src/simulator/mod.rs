@@ -354,21 +354,26 @@ pub struct Options {
     pub step_cap: Option<u64>,
     pub loader_trace: bool,
     pub headless: bool,
+    pub from_directory: Option<PathBuf>,
 }
 
 use eframe::egui;
 
+#[derive(Default, PartialEq, Eq)]
 enum ExecutionState {
     Running,
+    #[default]
     Suspended,
 }
 
+#[derive(Default)]
 pub(crate) struct CerealApp {
     machine: Machine,
     command: String,
     command_index: Option<usize>,
     command_history: Vec<String>,
     command_output: String,
+    script_commands: Vec<String>,
     breakpoints: BTreeMap<u16, String>,
     trace: Option<Box<dyn Write>>,
     execution_state: ExecutionState,
@@ -378,13 +383,7 @@ impl CerealApp {
     fn new(machine: Machine) -> Self {
         CerealApp {
             machine,
-            command: String::new(),
-            command_index: None,
-            command_history: Default::default(),
-            command_output: String::new(),
-            breakpoints: Default::default(),
-            trace: None,
-            execution_state: ExecutionState::Suspended,
+            ..Default::default()
         }
     }
 }
@@ -430,7 +429,7 @@ impl CerealApp {
             use egui::text::CCursor;
 
             self.command_history.push(self.command.to_string());
-            command::command(self);
+            command::command(self, &self.command.to_string());
             output.response.request_focus();
             output.state.set_ccursor_range(Some(CCursorRange::two(CCursor::new(0), CCursor::new(self.command.chars().count()))));
             output.state.store(ui.ctx(), output.response.id);
@@ -613,9 +612,17 @@ impl eframe::App for CerealApp {
             });
         });
 
-        if let ExecutionState::Running = self.execution_state {
+        if self.execution_state == ExecutionState::Running {
             self.run_frame().expect("No Execution Errors");
         }
+        if self.execution_state == ExecutionState::Suspended {
+            let cmds = self.script_commands.clone();
+            self.script_commands.clear();
+            for cmd in cmds {
+                command::command(self, &cmd);
+            }
+        }
+
     }
 }
 
@@ -623,8 +630,11 @@ impl eframe::App for CerealApp {
 pub fn run(options: Options) -> i16 {
     let mut machine = Machine::new();
 
-    let mut stdout = std::io::stdout();
+    if let Some(dir) = options.from_directory {
+        std::env::set_current_dir(dir).expect("Cannot local directory\n");
+    }
 
+    let mut stdout = std::io::stdout();
     for path in &options.input_paths {
         let bytes = match std::fs::read(path) {
             Ok(bytes) => bytes,

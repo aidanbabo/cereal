@@ -20,6 +20,7 @@ static HELP_MESSAGES: Lazy<BTreeMap<&str, &str>> = Lazy::new(|| {
     map.insert("loadhex", "loadhex usage: loadhex hexfile");
     map.insert("next", "n[ext] usage: n[ext]");
     map.insert("p", "p[rint] usage: p[rint]");
+    map.insert("pwd", "pwd usage: pwd");
     map.insert("quit", "quit usage: quit");
     map.insert("reset", "reset usage: reset");
     map.insert("s", "s[tep] usage: s[tep]"); // abbreviations for correct sorting
@@ -30,10 +31,14 @@ static HELP_MESSAGES: Lazy<BTreeMap<&str, &str>> = Lazy::new(|| {
     map
 });
 
-pub(crate) fn command(app: &mut CerealApp) {
-    let cmd = &*app.command;
+pub(crate) fn command(app: &mut CerealApp, cmd: &str) {
     let mut words = cmd.split_whitespace();
-    match &*words.next().unwrap_or("").to_lowercase() {
+    let first = words.next().unwrap_or("").to_lowercase();
+    if app.execution_state == ExecutionState::Running && first != "stop" {
+        app.script_commands.push(cmd.to_string());
+        return;
+    }
+    match &*first {
         "h" | "help" => {
             for (_, &help) in HELP_MESSAGES.iter() {
                 app.command_output.push_str(help);
@@ -116,6 +121,11 @@ pub(crate) fn command(app: &mut CerealApp) {
         "loadhex" => app.command_output.push_str("Unimplemented\n"),
         "n" | "next" => app.command_output.push_str("Unimplemented\n"),
         "p" | "print" => app.command_output.push_str("Unimplemented\n"),
+        "pwd" => {
+            let pwd = std::env::current_dir().expect("Current directory is valid");
+            app.command_output.push_str(&pwd.to_string_lossy());
+            app.command_output.push('\n');
+        },
         "quit" => app.command_output.push_str("Unimplemented\n"),
         "reset" => {
             app.machine.reset();
@@ -123,7 +133,20 @@ pub(crate) fn command(app: &mut CerealApp) {
             app.command_output.push_str("System reset\n");
         },
         "s" | "step" => app.command_output.push_str("Unimplemented\n"),
-        "script" => app.command_output.push_str("Unimplemented\n"),
+        "script" => {
+            let Some(filename) = words.next() else {
+                app.command_output.push_str(HELP_MESSAGES["script"]);
+                app.command_output.push('\n');
+                return;
+            };
+            let Ok(script) = std::fs::read_to_string(filename) else {
+                app.command_output.push_str(&format!("{} (No such file or directory)\n", filename));
+                return;
+            };
+            for cmd in script.lines() {
+                command(app, cmd);
+            }
+        },
         "set" => app.command_output.push_str("Unimplemented\n"),
         "stop" => {
             app.execution_state = ExecutionState::Suspended;
