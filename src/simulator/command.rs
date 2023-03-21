@@ -1,6 +1,6 @@
 use once_cell::sync::Lazy;
 use std::collections::BTreeMap;
-use crate::simulator::{loader, CerealApp, Machine};
+use crate::simulator::{loader, CerealApp, ExecutionState, Machine};
 
 static HELP_MESSAGES: Lazy<BTreeMap<&str, &str>> = Lazy::new(|| {
     let mut map = BTreeMap::new();
@@ -92,7 +92,10 @@ pub(crate) fn command(app: &mut CerealApp) {
             app.command_output.push_str(&format!("Breakpoint {verb} at x{addr:04X}\n"));
         },
         "bpred" => app.command_output.push_str("Unimplemented\n"),
-        "c" | "continue" => app.command_output.push_str("Unimplemented\n"),
+        "c" | "continue" => {
+            app.execution_state = ExecutionState::Running;
+            app.command_output.push_str("use the 'stop' command to interrupt execution\n");
+        },
         "check" => app.command_output.push_str("Unimplemented\n"),
         "clear" => app.command_output.clear(),
         "counters" => app.command_output.push_str("Unimplemented\n"),
@@ -122,8 +125,36 @@ pub(crate) fn command(app: &mut CerealApp) {
         "s" | "step" => app.command_output.push_str("Unimplemented\n"),
         "script" => app.command_output.push_str("Unimplemented\n"),
         "set" => app.command_output.push_str("Unimplemented\n"),
-        "stop" => app.command_output.push_str("Unimplemented\n"),
-        "trace" => app.command_output.push_str("Unimplemented\n"),
+        "stop" => {
+            app.execution_state = ExecutionState::Suspended;
+            app.command_output.push_str(&format!("Stopped at x{:04X}\n", app.machine.pc));
+        },
+        "trace" => {
+            match words.next().map(str::to_lowercase).as_deref() {
+                Some("on") => {
+                    let Some(filename) = words.next() else {
+                        app.command_output.push_str(HELP_MESSAGES["trace"]);
+                        app.command_output.push('\n');
+                        return;
+                    };
+
+                    let Ok(f) = std::fs::File::create(filename) else {
+                        app.command_output.push_str("Unable to open file\n");
+                        return;
+                    };
+                    app.trace = Some(Box::new(std::io::BufWriter::new(f)));
+                    app.command_output.push_str("Trace is on.\n");
+                },
+                Some("off") => {
+                    app.trace = None;
+                    app.command_output.push_str("Trace is off.\n");
+                },
+                _ => {
+                    app.command_output.push_str(HELP_MESSAGES["trace"]);
+                    app.command_output.push('\n');
+                },
+            }
+        },
         unknown => {
             app.command_output.push_str("Unknown command: ");
             app.command_output.push_str(unknown);
