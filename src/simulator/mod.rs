@@ -348,6 +348,7 @@ impl Trace {
         )
     }
 }
+#[derive(Default)]
 pub struct Options {
     pub trace_path: Option<PathBuf>,
     pub input_paths: Vec<PathBuf>,
@@ -355,6 +356,7 @@ pub struct Options {
     pub loader_trace: bool,
     pub headless: bool,
     pub from_directory: Option<PathBuf>,
+    pub startup_script: Option<PathBuf>,
 }
 
 use eframe::egui;
@@ -380,11 +382,15 @@ pub(crate) struct CerealApp {
 }
 
 impl CerealApp {
-    fn new(machine: Machine) -> Self {
-        CerealApp {
+    fn new(machine: Machine, startup_script: Option<PathBuf>) -> Self {
+        let mut app = CerealApp {
             machine,
             ..Default::default()
+        };
+        if let Some(path) = startup_script {
+            command::command(&mut app, &format!("script {}", path.to_string_lossy()));
         }
+        app
     }
 }
 
@@ -627,15 +633,15 @@ impl eframe::App for CerealApp {
 }
 
 // @Todo keep the machine around after an error
-pub fn run(options: Options) -> i16 {
+pub fn run(cli_options: Options) -> i16 {
     let mut machine = Machine::new();
 
-    if let Some(dir) = options.from_directory {
+    if let Some(dir) = cli_options.from_directory {
         std::env::set_current_dir(dir).expect("Cannot local directory\n");
     }
 
     let mut stdout = std::io::stdout();
-    for path in &options.input_paths {
+    for path in &cli_options.input_paths {
         let bytes = match std::fs::read(path) {
             Ok(bytes) => bytes,
             Err(e) => {
@@ -643,16 +649,16 @@ pub fn run(options: Options) -> i16 {
                 continue;
             }
         };
-        let loader_trace = options.loader_trace.then_some(&mut stdout as _); // unsizing coercion
+        let loader_trace = cli_options.loader_trace.then_some(&mut stdout as _); // unsizing coercion
         loader::load(&bytes, &mut machine, loader_trace).expect("Load failure");
     }
 
-    let mut trace_file = options.trace_path.as_ref().map(|path| {
+    let mut trace_file = cli_options.trace_path.as_ref().map(|path| {
         let file = std::fs::File::create(path).expect("Invalid file");
         std::io::BufWriter::new(file)
     });
 
-    if !options.headless {
+    if !cli_options.headless {
         let options = eframe::NativeOptions {
             initial_window_size: Some(egui::vec2(1040.0, 860.0)),
             ..Default::default()
@@ -660,7 +666,7 @@ pub fn run(options: Options) -> i16 {
         eframe::run_native(
             "Cereal Sim",
             options,
-            Box::new(|_cc| Box::new(CerealApp::new(machine))),
+            Box::new(|_cc| Box::new(CerealApp::new(machine, cli_options.startup_script))),
         ).unwrap();
 
         0
@@ -668,12 +674,12 @@ pub fn run(options: Options) -> i16 {
         let mut steps = 0;
         while machine.pc() != 0x80ff {
             steps += 1;
-            match options.step_cap {
+            match cli_options.step_cap {
                 Some(cap) if steps > cap => panic!("exceeded step limit"),
                 _ => {}
             }
 
-            let mut trace = options.trace_path.as_ref().map(|_| Trace::new());
+            let mut trace = cli_options.trace_path.as_ref().map(|_| Trace::new());
             match machine.step(&mut trace) {
                 Ok(()) => {}
                 Err(e) => {

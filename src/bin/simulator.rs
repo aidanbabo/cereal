@@ -14,6 +14,8 @@ struct Args {
     headless: bool,
     #[clap(long)]
     from_directory: Option<PathBuf>,
+    #[clap(short)]
+    script: Option<PathBuf>,
 }
 
 fn main() {
@@ -25,6 +27,7 @@ fn main() {
         loader_trace: args.loader_trace,
         headless: args.headless,
         from_directory: args.from_directory,
+        startup_script: args.script,
     };
     run(options);
 }

@@ -51,9 +51,8 @@ fn asm_trace_test(names: &[&str]) {
         trace_path: Some(output_file_name.clone().into()),
         input_paths: input_file_names,
         step_cap: Some(expected.lines().count() as u64),
-        loader_trace: false,
         headless: true,
-        from_directory: None,
+        ..Default::default()
     };
 
     run(options);

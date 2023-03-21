@@ -43,12 +43,10 @@ fn _simple_compiler_test(input: &[&str], output: &str) -> i16 {
     cereal::compile(options).expect("Compilation success");
 
     let options = Options {
-        trace_path: None,
         input_paths: vec![output.into()],
         step_cap: Some(5000),
-        loader_trace: false,
         headless: true,
-        from_directory: None,
+        ..Default::default()
     };
 
     run(options)
