@@ -1,0 +1,9 @@
+reset
+clear
+# as public-test_basic public-test_basic
+ld data/asm/public-test_basic
+break set HALT
+trace on data/tests/asm/public-test_basic.txt
+continue
+trace off
+quit

@@ -1,0 +1,11 @@
+reset
+clear
+# as os os
+ld data/asm/os
+ld data/asm/wireframe
+break set HALT
+break set TRAP_HALT
+trace on data/tests/asm/wireframe.txt
+continue
+trace off
+quit

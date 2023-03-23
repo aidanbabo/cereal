@@ -1,0 +1,9 @@
+reset
+clear
+# as public-branch0 public-branch0
+ld data/asm/public-branch0
+break set HALT
+trace on data/tests/asm/public-branch0.txt
+continue
+trace off
+quit

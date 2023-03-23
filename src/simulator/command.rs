@@ -31,9 +31,12 @@ static HELP_MESSAGES: Lazy<BTreeMap<&str, &str>> = Lazy::new(|| {
     map
 });
 
-pub(crate) fn command(app: &mut CerealApp, cmd: &str) {
+pub(crate) fn command(app: &mut CerealApp, frame: Option<&mut eframe::Frame>, cmd: &str) {
     let mut words = cmd.split_whitespace();
     let first = words.next().unwrap_or("").to_lowercase();
+    if first.starts_with("#") {
+        return;
+    }
     if app.execution_state == ExecutionState::Running && first != "stop" {
         app.script_commands.push(cmd.to_string());
         return;
@@ -126,7 +129,13 @@ pub(crate) fn command(app: &mut CerealApp, cmd: &str) {
             app.command_output.push_str(&pwd.to_string_lossy());
             app.command_output.push('\n');
         },
-        "quit" => app.command_output.push_str("Unimplemented\n"),
+        "quit" => {
+            if let Some(frame) = frame {
+                frame.close();
+            } else {
+                app.command_output.push_str("Quitting on app creation is unsupported\n");
+            }
+        },
         "reset" => {
             app.machine.reset();
             app.breakpoints.clear();
@@ -143,8 +152,16 @@ pub(crate) fn command(app: &mut CerealApp, cmd: &str) {
                 app.command_output.push_str(&format!("{} (No such file or directory)\n", filename));
                 return;
             };
-            for cmd in script.lines() {
-                command(app, cmd);
+
+            // Dumb Rust things :(
+            if let Some(f) = frame {
+                for cmd in script.lines() {
+                    command(app, Some(f), cmd);
+                }
+            } else {
+                for cmd in script.lines() {
+                    command(app, None, cmd);
+                }
             }
         },
         "set" => app.command_output.push_str("Unimplemented\n"),

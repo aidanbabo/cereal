@@ -388,14 +388,14 @@ impl CerealApp {
             ..Default::default()
         };
         if let Some(path) = startup_script {
-            command::command(&mut app, &format!("script {}", path.to_string_lossy()));
+            command::command(&mut app, None, &format!("script {}", path.to_string_lossy()));
         }
         app
     }
 }
 
 impl CerealApp {
-    fn command(&mut self, ui: &mut egui::Ui) {
+    fn command(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         ui.label("Command");
         
 
@@ -435,7 +435,7 @@ impl CerealApp {
             use egui::text::CCursor;
 
             self.command_history.push(self.command.to_string());
-            command::command(self, &self.command.to_string());
+            command::command(self, Some(frame), &self.command.to_string());
             output.response.request_focus();
             output.state.set_ccursor_range(Some(CCursorRange::two(CCursor::new(0), CCursor::new(self.command.chars().count()))));
             output.state.store(ui.ctx(), output.response.id);
@@ -592,11 +592,11 @@ impl CerealApp {
 }
 
 impl eframe::App for CerealApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.ctx().request_repaint();
 
-            self.command(ui);
+            self.command(ui, frame);
 
             ui.horizontal(|ui| {
                 ui.push_id("Registers and Device", |ui| {
@@ -625,7 +625,7 @@ impl eframe::App for CerealApp {
             let cmds = self.script_commands.clone();
             self.script_commands.clear();
             for cmd in cmds {
-                command::command(self, &cmd);
+                command::command(self, Some(frame), &cmd);
             }
         }
 
